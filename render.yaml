@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: jjak-azit
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: PUBLIC_URL
+        sync: false

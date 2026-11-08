@@ -1,0 +1,13 @@
+/* 갈무리 픽셀 폰트 (SIL Open Font License) — 필요한 두 종만 번들합니다 */
+@font-face {
+  font-family: Galmuri11;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../../../node_modules/galmuri/dist/Galmuri11.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Galmuri11 Bold';
+  font-weight: 400;
+  font-display: swap;
+  src: url('../../../node_modules/galmuri/dist/Galmuri11-Bold.woff2') format('woff2');
+}
