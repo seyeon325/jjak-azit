@@ -11,12 +11,14 @@ export function createGame(parent: HTMLElement, ctx: GameContext): { game: Phase
     antialias: false,
     scale: { mode: Phaser.Scale.RESIZE, width: parent.clientWidth, height: parent.clientHeight },
     fps: { target: 60 },
-    input: { keyboard: false, mouse: false, touch: false, gamepad: false },
+    input: { keyboard: false, mouse: true, touch: true, gamepad: false },
     banner: false,
     disableContextMenu: true,
     render: { powerPreference: 'high-performance', batchSize: 2048 },
   });
   game.scene.add('world', WorldScene, true, { ctx });
+  // 개발 모드 전용: 자동 테스트에서 프레임을 직접 진행시키기 위한 훅
+  if (import.meta.env.DEV) (window as unknown as { __azit: unknown }).__azit = { game, ctx };
   // 화면 회전·주소창 변화 등으로 크기가 바뀌면 즉시 다시 맞춤
   const ro = new ResizeObserver(() => game.scale.refresh());
   ro.observe(parent);

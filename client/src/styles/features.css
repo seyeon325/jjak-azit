@@ -1,0 +1,499 @@
+/* ============================================================
+   1차 수정: 학년 · 캐릭터 선택 · 상호작용 · 푸드트럭 · 게시판
+   ============================================================ */
+
+/* 학년 선택 */
+.grade-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+.grade-btn {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 1px;
+  height: 48px;
+  border-radius: 14px;
+  border: 3px solid var(--line);
+  background: #fff;
+  font-family: var(--pixel);
+  font-size: 12px;
+  color: var(--ink-2);
+  transition:
+    transform 0.12s,
+    border-color 0.12s;
+}
+.grade-btn b {
+  font-family: var(--pixel-bold);
+  font-weight: 400;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--ink);
+}
+.grade-btn.on {
+  border-color: var(--ink);
+  background: var(--sky-l);
+  color: var(--ink);
+  box-shadow: 0 3px 0 var(--ink);
+  transform: translateY(-2px);
+}
+
+/* 캐릭터 미리보기 무대 */
+.stage {
+  height: 240px;
+  padding-bottom: 56px;
+}
+.stage .char-preview {
+  width: 80px;
+  height: 130px;
+  top: 0;
+}
+.stage-btn {
+  position: absolute;
+  top: 84px;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  box-shadow: 0 3px 0 var(--ink);
+  font-size: 13px;
+  line-height: 1;
+  z-index: 2;
+}
+.stage-btn.left {
+  left: 10px;
+}
+.stage-btn.right {
+  right: 10px;
+}
+.stage-btn.wide {
+  top: auto;
+  bottom: 10px;
+  right: 10px;
+  width: auto;
+  height: 30px;
+  padding: 0 10px;
+  font-family: var(--pixel);
+  font-size: 12px;
+  box-shadow: 0 2px 0 var(--ink);
+}
+.stage-btn.wide.on {
+  background: var(--lemon);
+}
+.stage-btn:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--ink);
+}
+.stage-caption {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: grid;
+  gap: 2px;
+  max-width: calc(100% - 128px);
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: rgba(255, 250, 240, 0.92);
+  border: 2px solid var(--ink);
+  text-align: left;
+  z-index: 2;
+}
+.stage-caption strong {
+  font-family: var(--pixel-bold);
+  font-weight: 400;
+  font-size: 12px;
+}
+.stage-caption span {
+  font-size: 12px;
+  color: var(--ink-2);
+  line-height: 1.3;
+}
+.look-grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+@media (min-width: 400px) {
+  .look-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+.look-btn canvas {
+  width: 48px;
+  height: 78px;
+  margin-top: -12px;
+}
+
+/* 이름표: [학년] 닉네임 */
+.plate-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.plate-role i {
+  display: inline-flex;
+  width: 9px;
+  height: 8px;
+}
+.plate-role i svg {
+  width: 100%;
+  height: 100%;
+}
+.plate-tag.spring {
+  color: #ffd0b8;
+  margin-left: 1px;
+}
+.plate.bathing {
+  background: rgba(52, 98, 102, 0.85);
+}
+.plate.bathing::after {
+  border-top-color: rgba(52, 98, 102, 0.85);
+}
+
+/* 말풍선 */
+.bubble {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 3px 8px;
+  border-radius: 9px;
+  background: #fff;
+  border: 2px solid var(--ink);
+  font-family: var(--pixel);
+  font-size: 12px;
+  line-height: 14px;
+  white-space: nowrap;
+  color: var(--ink);
+  animation: pop 0.2s ease-out;
+  transition: opacity 0.3s;
+  z-index: 3;
+}
+.bubble.out {
+  opacity: 0;
+}
+
+/* 상호작용 버튼 */
+.action-bar {
+  position: absolute;
+  right: calc(14px + var(--safe-r));
+  bottom: calc(26px + var(--safe-b));
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none !important;
+  z-index: 6;
+}
+.act-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 16px;
+  border-radius: 16px;
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  box-shadow: 0 4px 0 var(--ink);
+  font-family: var(--pixel-bold);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: auto;
+  animation: pop 0.22s ease-out;
+}
+.act-btn.primary {
+  height: 58px;
+  padding: 0 20px;
+  font-size: 24px;
+}
+.act-btn:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--ink);
+}
+.act-btn.food.primary,
+.act-btn.eat.primary {
+  background: var(--coral);
+  color: #fff;
+  text-shadow: 0 2px 0 var(--coral-d);
+}
+.act-btn.bath.primary {
+  background: #8fdccd;
+}
+.act-btn.out.primary {
+  background: var(--lemon);
+}
+.act-btn.board.primary {
+  background: var(--sky-l);
+}
+.act-food {
+  width: 24px;
+  height: 24px;
+  image-rendering: pixelated;
+  background: var(--paper);
+  border-radius: 6px;
+}
+.act-key {
+  display: none;
+}
+@media (pointer: fine) {
+  .act-key {
+    display: inline-block;
+    font-size: 12px;
+    color: var(--ink);
+    text-shadow: none;
+  }
+}
+
+/* 공용 시트 제목 */
+.sheet-title {
+  margin: 0;
+  font-family: var(--pixel-bold);
+  font-weight: 400;
+  font-size: 12px;
+}
+.sheet-msg {
+  min-height: 18px;
+  margin: 8px 0 0 !important;
+  font-size: 13px !important;
+  font-weight: 600;
+  color: var(--coral-d);
+  text-align: center;
+}
+
+/* 푸드트럭 메뉴 */
+.food-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+@media (min-width: 720px) {
+  .food-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+.food-card {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 10px 8px;
+  border-radius: 16px;
+  border: 3px solid var(--line);
+  background: #fff;
+  text-align: center;
+  transition:
+    transform 0.12s,
+    border-color 0.12s;
+}
+.food-card:hover,
+.food-card:focus-visible {
+  border-color: var(--ink);
+  transform: translateY(-2px);
+}
+.food-card:active {
+  transform: translateY(1px);
+}
+.food-card:disabled {
+  opacity: 0.6;
+}
+.food-icon {
+  width: 48px;
+  height: 48px;
+  image-rendering: pixelated;
+}
+.food-card strong {
+  font-family: var(--pixel-bold);
+  font-weight: 400;
+  font-size: 12px;
+}
+.food-desc {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ink-2);
+}
+.food-react {
+  font-style: normal;
+  font-family: var(--pixel);
+  font-size: 12px;
+  padding: 1px 7px;
+  border-radius: 7px;
+  background: var(--lemon-l);
+}
+.food-react.hot {
+  background: var(--coral-l);
+}
+.food-react.heart {
+  background: #ffe0ea;
+}
+.food-react.star {
+  background: var(--lav-l);
+}
+
+/* 게시판 */
+.compose {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--bg);
+  border: 3px solid var(--ink);
+  box-shadow: 0 3px 0 var(--ink);
+}
+.compose textarea {
+  width: 100%;
+  resize: none;
+  border: 0;
+  background: transparent;
+  font-family: var(--body);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--ink);
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.compose textarea::placeholder {
+  color: rgba(61, 48, 71, 0.45);
+}
+.compose-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.note-colors {
+  display: flex;
+  gap: 5px;
+}
+.note-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--c);
+  border: 2px solid var(--ink);
+}
+.note-swatch.on {
+  box-shadow:
+    0 0 0 2px var(--paper),
+    0 0 0 4px var(--ink);
+}
+.note-count {
+  margin-left: auto;
+  font-family: var(--pixel);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.note-count.over {
+  color: var(--coral-d);
+}
+.btn-primary.small {
+  width: auto;
+  min-height: 38px;
+  padding: 0 14px;
+  font-size: 12px;
+  border-radius: 12px;
+  box-shadow: 0 3px 0 var(--ink);
+}
+.note-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 4px 2px 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+.note {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 96px;
+  padding: 12px 10px 8px;
+  background: var(--bg);
+  border: 2px solid rgba(61, 48, 71, 0.55);
+  border-radius: 3px 3px 12px 3px;
+  box-shadow: 0 3px 0 rgba(61, 48, 71, 0.25);
+  transform: rotate(var(--tilt));
+}
+.note::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: var(--coral);
+  border: 2px solid var(--ink);
+}
+.note.fresh {
+  animation: pop 0.35s ease-out;
+}
+.note p {
+  margin: 0 !important;
+  font-size: 14px !important;
+  font-weight: 600;
+  line-height: 1.45 !important;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.note footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.note footer b {
+  font-family: var(--pixel);
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note footer time {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.note-who {
+  display: inline-flex;
+  width: 10px;
+  height: 9px;
+  flex: none;
+}
+.note-who svg {
+  width: 100%;
+  height: 100%;
+}
+.note-who.senior {
+  color: var(--coral-d);
+}
+.note-who.junior {
+  color: var(--mint-d);
+}
+.note-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 18px 0;
+  color: var(--ink-2);
+  font-size: 14px;
+}
+
+/* 참가자 목록의 학년 */
+.people-list .grade {
+  font-family: var(--pixel);
+  font-size: 11px;
+  color: var(--ink-2);
+  margin-right: 4px;
+}
+.people-list .mini canvas {
+  width: 32px;
+  height: 52px;
+  margin: -10px 0 0 -3px;
+}
+.me-stage canvas {
+  height: 130px;
+}

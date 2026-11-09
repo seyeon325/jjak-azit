@@ -1,13 +1,17 @@
 /**
- * 캔버스 위에 띄우는 DOM 레이어: 이름표, 구역 라벨.
+ * 캔버스 위에 띄우는 DOM 레이어: 이름표, 말풍선, 구역 라벨.
  * 한글을 픽셀 확대 없이 선명하게 보여주기 위해 DOM 으로 그립니다.
- * (2차의 말풍선·이모트도 이 레이어에 붙이면 됩니다.)
  */
-import type { PlayerInfo } from '../../../shared/protocol';
+import { gradeLabel } from '../../../shared/foods';
 import type { Zone } from '../../../shared/map';
+import type { PlayerInfo } from '../../../shared/protocol';
+import { LOOKS } from '../game/art/characters';
+import { ICON } from './dom';
 
 interface Plate {
   el: HTMLDivElement;
+  bubble: HTMLDivElement | null;
+  bubbleTimer: number;
   wx: number;
   wy: number;
   w: number;
@@ -15,6 +19,8 @@ interface Plate {
   sx: number;
   sy: number;
   lift: number;
+  /** 모자 높이만큼 이름표를 더 올림 */
+  extra: number;
 }
 
 export interface CameraLike {
@@ -25,7 +31,8 @@ export interface CameraLike {
   y: number;
 }
 
-const HEAD_OFFSET = 21; // 발에서 머리 위까지(px, 월드 단위)
+const HEAD_OFFSET = 20; // 발에서 머리 위까지(px, 월드 단위)
+const TALL_HATS = new Set(['bunny', 'crown', 'mushroom', 'catBeanie', 'frog', 'bear']);
 
 export class WorldOverlay {
   readonly root: HTMLDivElement;
@@ -44,22 +51,35 @@ export class WorldOverlay {
       const el = document.createElement('div');
       el.className = 'plate';
       this.root.appendChild(el);
-      p = { el, wx: info.x, wy: info.y, w: 0, h: 0, sx: 0, sy: 0, lift: 0 };
+      p = { el, bubble: null, bubbleTimer: 0, wx: info.x, wy: info.y, w: 0, h: 0, sx: 0, sy: 0, lift: 0, extra: 0 };
       this.plates.set(info.id, p);
     }
+    const hat = LOOKS[info.look]?.hat;
+    p.extra = hat === 'bunny' ? 6 : hat && TALL_HATS.has(hat) ? 3 : 0;
     const el = p.el;
     el.classList.toggle('self', isSelf);
     el.classList.toggle('senior', info.role === 'senior');
     el.classList.toggle('junior', info.role === 'junior');
     el.classList.toggle('away', info.status === 'away');
+    el.classList.toggle('bathing', !!info.bath);
     el.replaceChildren();
+    // [학년] 표시 — 색과 아이콘으로 선배/후배 구분
     const badge = document.createElement('span');
     badge.className = 'plate-role';
-    badge.textContent = info.role === 'senior' ? '선배' : '후배';
+    badge.title = info.role === 'senior' ? '선배' : '후배';
+    const ico = document.createElement('i');
+    ico.innerHTML = info.role === 'senior' ? ICON.crown : ICON.sprout;
+    badge.append(ico, gradeLabel(info.grade));
     const name = document.createElement('span');
     name.className = 'plate-name';
     name.textContent = info.nickname;
     el.append(badge, name);
+    if (info.bath) {
+      const s = document.createElement('span');
+      s.className = 'plate-tag spring';
+      s.textContent = '♨';
+      el.append(s);
+    }
     if (info.status === 'away') {
       const s = document.createElement('span');
       s.className = 'plate-away';
@@ -69,20 +89,38 @@ export class WorldOverlay {
     p.w = 0; // 다음 렌더에서 다시 측정
   }
 
-  setStatus(info: PlayerInfo, isSelf: boolean) {
-    this.upsert(info, isSelf);
+  /** 머리 위 짧은 말풍선 */
+  bubble(id: number, text: string, ms = 1800) {
+    const p = this.plates.get(id);
+    if (!p) return;
+    if (!p.bubble) {
+      p.bubble = document.createElement('div');
+      p.bubble.className = 'bubble';
+      this.root.appendChild(p.bubble);
+    }
+    p.bubble.textContent = text;
+    p.bubble.classList.remove('out');
+    clearTimeout(p.bubbleTimer);
+    p.bubbleTimer = window.setTimeout(() => {
+      p.bubble?.classList.add('out');
+      p.bubbleTimer = window.setTimeout(() => {
+        p.bubble?.remove();
+        p.bubble = null;
+      }, 300);
+    }, ms);
   }
 
   remove(id: number) {
     const p = this.plates.get(id);
     if (!p) return;
     p.el.remove();
+    p.bubble?.remove();
+    clearTimeout(p.bubbleTimer);
     this.plates.delete(id);
   }
 
   clear() {
-    for (const p of this.plates.values()) p.el.remove();
-    this.plates.clear();
+    for (const id of [...this.plates.keys()]) this.remove(id);
   }
 
   setWorldPos(id: number, x: number, y: number) {
@@ -120,7 +158,7 @@ export class WorldOverlay {
         p.h = p.el.offsetHeight;
       }
       p.sx = (p.wx - v.x) * z + cam.x;
-      p.sy = (p.wy - HEAD_OFFSET - v.y) * z + cam.y;
+      p.sy = (p.wy - HEAD_OFFSET - p.extra - v.y) * z + cam.y;
       p.lift = 0;
       const visible = p.sx > -80 && p.sx < viewW + 80 && p.sy > -40 && p.sy < viewH + 60;
       p.el.style.visibility = visible ? 'visible' : 'hidden';
@@ -145,8 +183,10 @@ export class WorldOverlay {
       }
     }
     for (const p of list) {
-      p.el.style.transform = `translate3d(${Math.round(p.sx - p.w / 2)}px, ${Math.round(p.sy - p.h - p.lift)}px, 0)`;
+      const top = Math.round(p.sy - p.h - p.lift);
+      p.el.style.transform = `translate3d(${Math.round(p.sx - p.w / 2)}px, ${top}px, 0)`;
       p.el.classList.toggle('stacked', p.lift > 0);
+      if (p.bubble) p.bubble.style.transform = `translate3d(${Math.round(p.sx)}px, ${top - 4}px, 0) translate(-50%, -100%)`;
     }
     for (const zl of this.zoneEls) {
       zl.el.style.transform = `translate3d(${Math.round((zl.x - v.x) * z + cam.x)}px, ${Math.round((zl.y - v.y) * z + cam.y)}px, 0) translate(-50%, -50%)`;

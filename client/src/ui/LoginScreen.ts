@@ -1,9 +1,12 @@
-/** 접속 화면: 닉네임 → 선배/후배 → 캐릭터·색상 → 입장 */
-import { COLOR_COUNT, LOOK_COUNT, NICK_MAX } from '../../../shared/constants';
-import type { Profile, Role } from '../../../shared/protocol';
-import { COLORS, LOOKS } from '../game/art/characters';
-import { CharacterPreview } from './CharacterPreview';
-import { h, icon, logoMark } from './dom';
+/** 접속 화면: 닉네임 → 학년 → 선배/후배 → 캐릭터 → 입장 */
+import { LOOK_COUNT, NICK_MAX } from '../../../shared/constants';
+import { gradeLabel } from '../../../shared/foods';
+import type { Grade, Profile, Role } from '../../../shared/protocol';
+import { LOOKS } from '../game/art/characters';
+import { CharacterPreview, type PreviewDir } from './CharacterPreview';
+import { h, icon, ICON, logoMark } from './dom';
+
+const GRADES: Grade[] = [1, 2, 3, 4, 0];
 
 export class LoginScreen {
   readonly el: HTMLElement;
@@ -12,28 +15,30 @@ export class LoginScreen {
   private msg: HTMLParagraphElement;
   private submitBtn: HTMLButtonElement;
   private role: Role | null = null;
+  private grade: Grade | null = null;
   private look = 0;
-  private color = 0;
   private big: CharacterPreview;
-  private bigName: HTMLSpanElement;
-  private bigRole: HTMLSpanElement;
+  private plate: HTMLDivElement;
+  private lookName: HTMLElement;
+  private lookDesc: HTMLElement;
+  private walkBtn: HTMLButtonElement;
   private lookBtns: HTMLButtonElement[] = [];
-  private colorBtns: HTMLButtonElement[] = [];
+  private gradeBtns: HTMLButtonElement[] = [];
   private roleBtns: Record<Role, HTMLButtonElement>;
   private thumbs: CharacterPreview[] = [];
   private busy = false;
 
   constructor(
     private onSubmit: (p: Profile) => Promise<string | null>,
-    initial: Profile | null,
+    initial: Partial<Profile> | null,
   ) {
+    // 이전 버전에 저장된 프로필(학년 없음)도 그대로 불러옵니다
     if (initial) {
-      this.role = initial.role;
-      this.look = clamp(initial.look, LOOK_COUNT);
-      this.color = clamp(initial.color, COLOR_COUNT);
+      if (initial.role === 'senior' || initial.role === 'junior') this.role = initial.role;
+      if (typeof initial.grade === 'number' && GRADES.includes(initial.grade)) this.grade = initial.grade;
+      this.look = Number.isInteger(initial.look) && initial.look! >= 0 && initial.look! < LOOK_COUNT ? initial.look! : 0;
     } else {
       this.look = Math.floor(Math.random() * LOOK_COUNT);
-      this.color = Math.floor(Math.random() * COLOR_COUNT);
     }
 
     this.nick = h('input', {
@@ -48,8 +53,21 @@ export class LoginScreen {
         if ((e as KeyboardEvent).key === 'Enter') (e.target as HTMLInputElement).blur();
       },
     });
-    if (initial) this.nick.value = initial.nickname;
+    if (initial?.nickname) this.nick.value = initial.nickname;
     this.counter = h('span', { class: 'counter' });
+
+    const gradeRow = h('div', { class: 'grade-row', role: 'radiogroup', 'aria-label': '학년' });
+    for (const g of GRADES) {
+      const b = h(
+        'button',
+        { type: 'button', class: 'grade-btn', role: 'radio', onclick: () => this.setGrade(g) },
+        g ? h('b', {}, String(g)) : null,
+        g ? '학년' : '기타',
+      );
+      if (!g) b.title = '편입생·졸업생 등';
+      this.gradeBtns.push(b);
+      gradeRow.append(b);
+    }
 
     this.roleBtns = {
       senior: h(
@@ -68,18 +86,37 @@ export class LoginScreen {
       ),
     };
 
-    this.big = new CharacterPreview(this.look, this.color, 6, 'tour');
-    this.bigName = h('span', { class: 'plate-name' });
-    this.bigRole = h('span', { class: 'plate-role' });
-    const bigPlate = h('div', { class: 'plate preview-plate' }, this.bigRole, this.bigName);
+    // 큰 미리보기
+    this.big = new CharacterPreview(this.look, 5, 'tour');
+    this.plate = h('div', { class: 'plate preview-plate' });
+    this.lookName = h('strong', {});
+    this.lookDesc = h('span', {});
+    this.walkBtn = h('button', { type: 'button', class: 'stage-btn wide', onclick: () => this.toggleWalk() }, '걷기');
+    const rotate = (d: 1 | -1) => {
+      const order: PreviewDir[] = [0, 2, 1, 3];
+      if (this.big.pose === 'tour') this.big.pose = 'idle';
+      const i = order.indexOf(this.big.dir);
+      this.big.dir = order[(i + d + 4) % 4];
+      this.refresh();
+    };
+    const stage = h(
+      'div',
+      { class: 'stage' },
+      this.plate,
+      this.big.canvas,
+      h('button', { type: 'button', class: 'stage-btn left', 'aria-label': '왼쪽으로 돌리기', onclick: () => rotate(-1) }, '◀'),
+      h('button', { type: 'button', class: 'stage-btn right', 'aria-label': '오른쪽으로 돌리기', onclick: () => rotate(1) }, '▶'),
+      h('div', { class: 'stage-caption' }, this.lookName, this.lookDesc),
+      this.walkBtn,
+    );
 
-    const lookGrid = h('div', { class: 'look-grid', role: 'radiogroup', 'aria-label': '캐릭터 외형' });
+    const lookGrid = h('div', { class: 'look-grid', role: 'radiogroup', 'aria-label': '캐릭터' });
     LOOKS.forEach((l, i) => {
-      const thumb = new CharacterPreview(i, this.color, 3, 'idle');
+      const thumb = new CharacterPreview(i, 3, 'idle');
       this.thumbs.push(thumb);
       const b = h(
         'button',
-        { type: 'button', class: 'look-btn', role: 'radio', 'aria-label': l.name, onclick: () => this.setLook(i) },
+        { type: 'button', class: 'look-btn', role: 'radio', 'aria-label': `${l.name} — ${l.desc}`, onclick: () => this.setLook(i) },
         thumb.canvas,
         h('span', {}, l.name),
       );
@@ -87,23 +124,11 @@ export class LoginScreen {
       lookGrid.append(b);
     });
 
-    const colorRow = h('div', { class: 'color-row', role: 'radiogroup', 'aria-label': '옷 색상' });
-    COLORS.forEach((c, i) => {
-      const b = h('button', {
-        type: 'button',
-        class: 'swatch',
-        role: 'radio',
-        title: c.name,
-        'aria-label': c.name,
-        style: `--c:${c.base};--cd:${c.dark}`,
-        onclick: () => this.setColor(i),
-      });
-      this.colorBtns.push(b);
-      colorRow.append(b);
-    });
-
     this.msg = h('p', { class: 'login-msg', role: 'status', 'aria-live': 'polite' });
     this.submitBtn = h('button', { type: 'submit', class: 'btn-primary enter-btn' }, '아지트 입장하기');
+
+    const step = (n: number, title: string, ...body: (Node | null)[]) =>
+      h('section', { class: 'step' }, h('div', { class: 'step-title' }, h('b', {}, String(n)), title), ...body);
 
     const form = h(
       'form',
@@ -128,21 +153,9 @@ export class LoginScreen {
         h('label', { class: 'step-title', for: 'nick' }, h('b', {}, '1'), '닉네임'),
         h('div', { class: 'nick-field' }, this.nick, this.counter),
       ),
-      h(
-        'section',
-        { class: 'step' },
-        h('div', { class: 'step-title' }, h('b', {}, '2'), '나는…'),
-        h('div', { class: 'role-row' }, this.roleBtns.senior, this.roleBtns.junior),
-      ),
-      h(
-        'section',
-        { class: 'step' },
-        h('div', { class: 'step-title' }, h('b', {}, '3'), '캐릭터 고르기'),
-        h('div', { class: 'stage' }, h('div', { class: 'stage-floor' }), bigPlate, this.big.canvas),
-        lookGrid,
-        h('div', { class: 'color-label' }, '옷 색상'),
-        colorRow,
-      ),
+      step(2, '학년', gradeRow),
+      step(3, '나는…', h('div', { class: 'role-row' }, this.roleBtns.senior, this.roleBtns.junior)),
+      step(4, '캐릭터 고르기', stage, lookGrid),
       this.submitBtn,
       this.msg,
     );
@@ -165,13 +178,17 @@ export class LoginScreen {
     this.role = r;
     this.refresh();
   }
-  private setLook(i: number) {
-    this.look = i;
+  private setGrade(g: Grade) {
+    this.grade = g;
     this.refresh();
   }
-  private setColor(i: number) {
-    this.color = i;
-    this.thumbs.forEach((t, li) => t.set(li, i));
+  private setLook(i: number) {
+    this.look = i;
+    this.big.pose = 'tour';
+    this.refresh();
+  }
+  private toggleWalk() {
+    this.big.pose = this.big.pose === 'idle' ? 'walk' : 'idle';
     this.refresh();
   }
 
@@ -179,26 +196,32 @@ export class LoginScreen {
     const len = Array.from(this.nick.value.trim()).length;
     this.counter.textContent = `${Math.min(len, NICK_MAX)}/${NICK_MAX}`;
     this.counter.classList.toggle('over', len > NICK_MAX);
-    this.roleBtns.senior.classList.toggle('on', this.role === 'senior');
-    this.roleBtns.junior.classList.toggle('on', this.role === 'junior');
-    this.roleBtns.senior.setAttribute('aria-pressed', String(this.role === 'senior'));
-    this.roleBtns.junior.setAttribute('aria-pressed', String(this.role === 'junior'));
+    for (const r of ['senior', 'junior'] as Role[]) {
+      this.roleBtns[r].classList.toggle('on', this.role === r);
+      this.roleBtns[r].setAttribute('aria-pressed', String(this.role === r));
+    }
+    this.gradeBtns.forEach((b, i) => {
+      b.classList.toggle('on', GRADES[i] === this.grade);
+      b.setAttribute('aria-checked', String(GRADES[i] === this.grade));
+    });
     this.lookBtns.forEach((b, i) => {
       b.classList.toggle('on', i === this.look);
       b.setAttribute('aria-checked', String(i === this.look));
     });
-    this.colorBtns.forEach((b, i) => {
-      b.classList.toggle('on', i === this.color);
-      b.setAttribute('aria-checked', String(i === this.color));
-    });
-    this.thumbs.forEach((t, i) => t.set(i, this.color));
-    this.big.set(this.look, this.color);
-    this.bigName.textContent = this.nickValue() || '닉네임';
-    const plate = this.bigName.parentElement!;
-    plate.classList.toggle('senior', this.role === 'senior');
-    plate.classList.toggle('junior', this.role === 'junior');
-    plate.classList.toggle('no-role', !this.role);
-    this.bigRole.textContent = this.role ? (this.role === 'senior' ? '선배' : '후배') : '?';
+    this.big.set(this.look);
+    const L = LOOKS[this.look];
+    this.lookName.textContent = L.name;
+    this.lookDesc.textContent = L.desc;
+    this.walkBtn.textContent = this.big.pose === 'walk' ? '멈추기' : this.big.pose === 'tour' ? '둘러보는 중' : '걷기';
+    this.walkBtn.classList.toggle('on', this.big.pose !== 'idle');
+
+    // 이름표 미리보기: [3학년] 닉네임
+    const p = this.plate;
+    p.className = `plate preview-plate ${this.role ?? 'no-role'}`;
+    const badge = h('span', { class: 'plate-role' });
+    if (this.role) badge.append(h('i', { html: this.role === 'senior' ? ICON.crown : ICON.sprout }));
+    badge.append(this.grade === null ? '학년' : gradeLabel(this.grade));
+    p.replaceChildren(badge, h('span', { class: 'plate-name' }, this.nickValue() || '닉네임'));
   }
 
   setMessage(text: string, kind: 'error' | 'info' = 'error') {
@@ -214,6 +237,10 @@ export class LoginScreen {
       this.nick.focus();
       return;
     }
+    if (this.grade === null) {
+      this.setMessage('학년을 골라주세요.');
+      return;
+    }
     if (!this.role) {
       this.setMessage('선배인지 후배인지 골라주세요.');
       return;
@@ -222,7 +249,7 @@ export class LoginScreen {
     this.submitBtn.disabled = true;
     this.submitBtn.textContent = '입장하는 중…';
     this.setMessage('', 'info');
-    const err = await this.onSubmit({ nickname, role: this.role, look: this.look, color: this.color });
+    const err = await this.onSubmit({ nickname, role: this.role, grade: this.grade, look: this.look, color: 0 });
     this.busy = false;
     this.submitBtn.disabled = false;
     this.submitBtn.textContent = '아지트 입장하기';
@@ -234,8 +261,4 @@ export class LoginScreen {
     this.thumbs.forEach((t) => t.destroy());
     this.el.remove();
   }
-}
-
-function clamp(n: number, count: number) {
-  return Number.isInteger(n) && n >= 0 && n < count ? n : 0;
 }

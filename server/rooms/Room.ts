@@ -5,6 +5,7 @@ import type {
   LeaveReason,
   MoveInput,
   PlayerInfo,
+  PlayerPatch,
   PlayerState,
   PresenceStatus,
   RoomSnapshot,
@@ -13,13 +14,15 @@ import type {
 
 export type IO = Server<ClientToServerEvents, ServerToClientEvents>;
 
-interface PlayerRecord {
+export interface PlayerRecord {
   info: PlayerInfo;
   dirty: boolean;
   lastMoveAt: number;
   /** 초당 메시지 수 제한용 */
   windowStart: number;
   windowCount: number;
+  /** 진행 중인 타이머 (먹기 등) */
+  timers: NodeJS.Timeout[];
 }
 
 /**
@@ -74,12 +77,15 @@ export class Room {
 
   addPlayer(info: PlayerInfo) {
     const now = Date.now();
-    this.players.set(info.id, { info, dirty: false, lastMoveAt: now, windowStart: now, windowCount: 0 });
+    this.players.set(info.id, { info, dirty: false, lastMoveAt: now, windowStart: now, windowCount: 0, timers: [] });
     this.io.to(this.channel).emit('pj', { ...info });
   }
 
   removePlayer(id: number, reason: LeaveReason) {
-    if (!this.players.delete(id)) return;
+    const rec = this.players.get(id);
+    if (!rec) return;
+    rec.timers.forEach(clearTimeout);
+    this.players.delete(id);
     this.io.to(this.channel).emit('pl', id, reason);
   }
 
@@ -89,6 +95,15 @@ export class Room {
     rec.info.status = status;
     if (status === 'away') rec.info.moving = false;
     this.io.to(this.channel).emit('ps', id, status);
+  }
+
+  /** 참가자 상태 일부 변경 + 모두에게 알림 */
+  patch(id: number, patch: PlayerPatch) {
+    const rec = this.players.get(id);
+    if (!rec) return;
+    Object.assign(rec.info, patch);
+    if (patch.x !== undefined || patch.y !== undefined) rec.lastMoveAt = Date.now();
+    this.io.to(this.channel).emit('pu', id, patch);
   }
 
   /** 이동 입력 처리. 받아들일 수 없는 위치면 보정 좌표를 반환합니다. */
@@ -107,7 +122,7 @@ export class Room {
     const dt = Math.min(1, Math.max(0, (now - rec.lastMoveAt) / 1000));
     const allowed = MOVE_SPEED * dt * 1.6 + 14;
     const dist = Math.hypot(x - info.x, y - info.y);
-    if (dist > allowed || !this.canStand(x, y)) {
+    if (dist > allowed || !this.canStand(x, y, info.bath)) {
       rec.lastMoveAt = now;
       return { x: info.x, y: info.y };
     }
@@ -123,7 +138,7 @@ export class Room {
   }
 
   /** 하위 클래스에서 맵 충돌 규칙을 제공합니다 */
-  protected canStand(_x: number, _y: number): boolean {
+  protected canStand(_x: number, _y: number, _bath: boolean): boolean {
     return true;
   }
 

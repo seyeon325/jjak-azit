@@ -196,14 +196,16 @@ export function drawPixelText(
   let ctx = tmp.getContext('2d', { willReadFrequently: true })!;
   ctx.font = font;
   const w = Math.ceil(ctx.measureText(text).width) + 2;
-  const h = 16;
+  // 위쪽 1~2px 이 잘리지 않도록 여유를 두고 그린 뒤 PAD 만큼 올려서 찍음
+  const PAD = 3;
+  const h = 16 + PAD;
   tmp.width = w;
   tmp.height = h;
   ctx = tmp.getContext('2d', { willReadFrequently: true })!;
   ctx.font = font;
   ctx.textBaseline = 'top';
   ctx.fillStyle = '#000';
-  ctx.fillText(text, 1, 0);
+  ctx.fillText(text, 1, PAD);
   const data = ctx.getImageData(0, 0, w, h).data;
   const x0 = Math.round(cx - w / 2);
   const col = hex(color);
@@ -212,8 +214,8 @@ export function drawPixelText(
   for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) on[j * w + i] = data[(j * w + i) * 4 + 3] > 100 ? 1 : 0;
   if (sh)
     for (let j = 0; j < h; j++)
-      for (let i = 0; i < w; i++) if (on[j * w + i] && !on[(j + 1) * w + i]) pc.set(x0 + i, y + j + 1, sh);
-  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) if (on[j * w + i]) pc.set(x0 + i, y + j, col);
+      for (let i = 0; i < w; i++) if (on[j * w + i] && !on[(j + 1) * w + i]) pc.set(x0 + i, y + j + 1 - PAD, sh);
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) if (on[j * w + i]) pc.set(x0 + i, y + j - PAD, col);
 }
 
 export function measurePixelText(text: string, font = PIXEL_FONT): number {

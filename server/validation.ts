@@ -1,14 +1,13 @@
 import { COLOR_COUNT, LOOK_COUNT, NICK_MAX, NICK_MIN } from '../shared/constants';
-import type { Dir, MoveInput, Profile } from '../shared/protocol';
+import { FOOD_IDS, type ActRequest, type Dir, type FoodId, type Grade, type MoveInput, type Profile } from '../shared/protocol';
+
+/** 보이지 않는 제어문자·방향 제어문자 (줄바꿈 \n 은 허용) */
+const INVISIBLE = new RegExp('[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]', 'g');
 
 /** 닉네임 정리: 제어문자·과도한 공백 제거, 길이 제한 */
 export function sanitizeNickname(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
-  const cleaned = raw
-    .normalize('NFC')
-    .replace(new RegExp('[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]', 'g'), '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const cleaned = raw.normalize('NFC').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim();
   const chars = Array.from(cleaned);
   if (chars.length < NICK_MIN) return null;
   return chars.slice(0, NICK_MAX).join('');
@@ -22,10 +21,13 @@ export function sanitizeProfile(raw: unknown): Profile | { error: string } {
   const role = p.role === 'senior' || p.role === 'junior' ? p.role : null;
   if (!role) return { error: '선배 / 후배를 선택해주세요.' };
   const look = Number(p.look);
-  const color = Number(p.color);
   if (!Number.isInteger(look) || look < 0 || look >= LOOK_COUNT) return { error: '캐릭터를 선택해주세요.' };
-  if (!Number.isInteger(color) || color < 0 || color >= COLOR_COUNT) return { error: '색상을 선택해주세요.' };
-  return { nickname, role, look, color };
+  // 이전 버전 클라이언트는 학년/색상을 보내지 않을 수 있음 → 기본값으로 호환
+  const g = Number(p.grade);
+  const grade = (Number.isInteger(g) && g >= 0 && g <= 4 ? g : 0) as Grade;
+  const c = Number(p.color);
+  const color = Number.isInteger(c) && c >= 0 && c < COLOR_COUNT ? c : 0;
+  return { nickname, role, grade, look, color };
 }
 
 export function parseMove(raw: unknown): MoveInput | null {
@@ -34,4 +36,28 @@ export function parseMove(raw: unknown): MoveInput | null {
   if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return null;
   if (d !== 0 && d !== 1 && d !== 2 && d !== 3) return null;
   return [Math.round(x * 10) / 10, Math.round(y * 10) / 10, d as Dir, m ? 1 : 0];
+}
+
+export function parseAct(raw: unknown): ActRequest | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  if (r.t === 'eat') return { t: 'eat' };
+  if (r.t === 'bath') return { t: 'bath', on: !!r.on };
+  if (r.t === 'food' && FOOD_IDS.includes(r.food as FoodId)) return { t: 'food', food: r.food as FoodId };
+  return null;
+}
+
+/** 게시판 쪽지 정리 */
+export function sanitizeNote(raw: unknown, max: number): string | null {
+  if (typeof raw !== 'string') return null;
+  const cleaned = raw
+    .normalize('NFC')
+    .replace(/\r\n?/g, '\n')
+    .replace(INVISIBLE, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  const chars = Array.from(cleaned);
+  if (!chars.length) return null;
+  return chars.slice(0, max).join('');
 }

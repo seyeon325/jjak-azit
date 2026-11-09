@@ -5,8 +5,10 @@
  */
 import './styles/fonts.css';
 import './styles/main.css';
+import './styles/features.css';
 import type Phaser from 'phaser';
 import type { JoinResult, Profile } from '../../shared/protocol';
+import { gradeLabel } from '../../shared/foods';
 import { WORLD } from '../../shared/map';
 import { InputController } from './game/InputController';
 import type { WorldScene } from './game/scenes/WorldScene';
@@ -55,6 +57,8 @@ async function startGame(mode: 'player' | 'screen', store: WorldStore, net: Netw
       input,
       overlay,
       onZoneChange: (z) => hud?.setZone(z),
+      onInteract: (st) => hud?.setInteract(st),
+      onBoardTap: () => hud?.openBoardPanel(),
       onReady: () => resolve(),
     });
     gameRef = game;
@@ -93,7 +97,7 @@ async function runPlayer() {
     inGame = true;
     const input = new InputController();
     const g = await startGame('player', store, net, input);
-    hud = new Hud(store, {
+    hud = new Hud(store, net, {
       onRecreate: () => {
         net.leave();
         Storage.token = null;
@@ -103,7 +107,7 @@ async function runPlayer() {
     g.setHud(hud);
     g.stage.append(hud.el, new Joystick(input).el);
     const me = store.self;
-    if (me) hud.toast(`어서 와요, ${me.nickname} ${me.role === 'senior' ? '선배' : '후배'}님!`, 'info');
+    if (me) hud.toast(`어서 와요, ${gradeLabel(me.grade)} ${me.nickname} ${me.role === 'senior' ? '선배' : '후배'}님!`, 'info');
   };
 
   // 저장된 세션이 있으면 바로 복귀 (새로고침 대응)

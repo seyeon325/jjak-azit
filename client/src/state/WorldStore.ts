@@ -4,7 +4,17 @@
  * 화면(Phaser)과 UI(HUD)는 이 저장소만 바라봅니다.
  */
 import { INTERP_DELAY_MS, TICK_HZ } from '../../../shared/constants';
-import type { Dir, LeaveReason, PlayerInfo, PlayerState, PresenceStatus, RoomSnapshot } from '../../../shared/protocol';
+import type {
+  BoardNote,
+  Dir,
+  FoodId,
+  LeaveReason,
+  PlayerInfo,
+  PlayerPatch,
+  PlayerState,
+  PresenceStatus,
+  RoomSnapshot,
+} from '../../../shared/protocol';
 import type { GameSocket } from '../net/Network';
 import { Emitter } from './Emitter';
 
@@ -28,6 +38,12 @@ type StoreEvents = {
   status: [PlayerInfo, PresenceStatus];
   count: [number];
   correct: [number, number];
+  /** 음식·온천 등 상태 변경 */
+  patch: [PlayerInfo, PlayerPatch];
+  /** 먹기 시작 */
+  eat: [PlayerInfo, FoodId];
+  /** 새 게시판 쪽지 */
+  note: [BoardNote];
 };
 
 const TICK_MS = 1000 / TICK_HZ;
@@ -57,6 +73,22 @@ export class WorldStore extends Emitter<StoreEvents> {
       this.emit('count', this.onlineCount);
     });
     socket.on('cx', (x, y) => this.emit('correct', x, y));
+    socket.on('pu', (id, patch) => {
+      const e = this.players.get(id);
+      if (!e) return;
+      Object.assign(e.info, patch);
+      if (patch.x !== undefined && patch.y !== undefined) {
+        // 순간 이동 (온천 들어가기/나오기): 보간 기록을 새 위치로 초기화
+        const t = this.renderTime() + INTERP_DELAY_MS;
+        e.samples = [{ t, x: patch.x, y: patch.y, dir: e.info.dir, moving: false }];
+      }
+      this.emit('patch', e.info, patch);
+    });
+    socket.on('pe', (id, food) => {
+      const e = this.players.get(id);
+      if (e) this.emit('eat', e.info, food);
+    });
+    socket.on('bn', (note) => this.emit('note', note));
   }
 
   reset(room: RoomSnapshot, selfId: number | null) {

@@ -5,6 +5,10 @@
  */
 import { io, type Socket } from 'socket.io-client';
 import type {
+  ActRequest,
+  ActResult,
+  BoardNote,
+  BoardPostResult,
   ClientToServerEvents,
   JoinResult,
   MoveInput,
@@ -107,6 +111,19 @@ export class Network {
 
   sendMove(input: MoveInput) {
     if (this.socket.connected) this.socket.volatile.emit('m', input);
+  }
+
+  act(req: ActRequest): Promise<ActResult> {
+    return this.call<ActResult>((ack) => this.socket.emit('act', req, ack));
+  }
+
+  async boardList(): Promise<BoardNote[]> {
+    const res = await this.call<BoardNote[]>((ack) => this.socket.emit('boardList', ack));
+    return Array.isArray(res) ? res : [];
+  }
+
+  boardPost(text: string, color: number): Promise<BoardPostResult> {
+    return this.call<BoardPostResult>((ack) => this.socket.emit('boardPost', { text, color }, ack));
   }
 
   leave() {

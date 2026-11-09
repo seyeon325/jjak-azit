@@ -11,16 +11,20 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { Server, type Socket } from 'socket.io';
+import { NOTE_MAX } from '../shared/constants';
 import type { ClientToServerEvents, JoinResult, PlayerInfo, ServerToClientEvents } from '../shared/protocol';
+import { BoardStore } from './BoardStore';
 import { PlazaRoom } from './rooms/PlazaRoom';
 import { SessionStore, type Session } from './sessions';
-import { parseMove, sanitizeProfile } from './validation';
+import { parseAct, parseMove, sanitizeNote, sanitizeProfile } from './validation';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const PUBLIC_URL = (process.env.PUBLIC_URL ?? '').trim().replace(/\/$/, '');
 const MAX_PLAYERS = Number(process.env.MAX_PLAYERS ?? 60);
 const GRACE_MS = Number(process.env.RECONNECT_GRACE_SEC ?? 45) * 1000;
 const IS_PROD = process.env.NODE_ENV === 'production';
+const BOARD_FILE = process.env.BOARD_FILE ?? path.resolve(process.cwd(), 'data/board.json');
+const NOTE_COOLDOWN_MS = 8000;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIR = path.resolve(__dirname, '../dist/client');
@@ -94,6 +98,8 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string,
 const plaza = new PlazaRoom(io);
 plaza.start();
 const sessions = new SessionStore();
+const board = new BoardStore(BOARD_FILE);
+const lastNoteAt = new Map<number, number>();
 let nextPlayerId = 1;
 
 function attach(socket: IOSocket, session: Session) {
@@ -149,11 +155,14 @@ io.on('connection', (rawSocket) => {
       moving: false,
       status: 'online',
       joinedAt: Date.now(),
+      food: null,
+      eating: false,
+      bath: false,
     };
     const session = sessions.create(randomUUID(), info.id, profile.nickname);
     plaza.addPlayer(info);
     attach(socket, session);
-    log(`입장: ${info.nickname} (#${info.id}, ${info.role === 'senior' ? '선배' : '후배'}) · 접속 ${plaza.onlineCount}명`);
+    log(`입장: ${info.nickname} (#${info.id}, ${info.grade ? info.grade + '학년' : '기타'} ${info.role === 'senior' ? '선배' : '후배'}) · 접속 ${plaza.onlineCount}명`);
     const res: JoinResult = { ok: true, selfId: info.id, token: session.token, room: plaza.snapshot() };
     ack(res);
   });
@@ -183,6 +192,43 @@ io.on('connection', (rawSocket) => {
     if (!session || !input) return;
     const fix = plaza.handleMove(session.playerId, input);
     if (fix) socket.emit('cx', fix.x, fix.y);
+  });
+
+  socket.on('act', (raw, ack) => {
+    if (typeof ack !== 'function') return;
+    const session = sessions.get(socket.data.token);
+    const req = parseAct(raw);
+    if (!session || !req) return ack({ ok: false, reason: '요청을 처리할 수 없어요.' });
+    ack(plaza.act(session.playerId, req));
+  });
+
+  socket.on('boardList', (ack) => {
+    if (typeof ack === 'function') ack(board.list());
+  });
+
+  socket.on('boardPost', (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    const session = sessions.get(socket.data.token);
+    const me = session && plaza.get(session.playerId);
+    if (!session || !me) return ack({ ok: false, reason: '아지트에 입장한 뒤 쪽지를 남길 수 있어요.' });
+    const text = sanitizeNote(payload?.text, NOTE_MAX);
+    if (!text) return ack({ ok: false, reason: '쪽지 내용을 입력해주세요.' });
+    const last = lastNoteAt.get(me.id) ?? 0;
+    const wait = NOTE_COOLDOWN_MS - (Date.now() - last);
+    if (wait > 0) return ack({ ok: false, reason: `${Math.ceil(wait / 1000)}초 뒤에 다시 남길 수 있어요.` });
+    lastNoteAt.set(me.id, Date.now());
+    const c = Number(payload?.color);
+    const note = board.add({
+      nickname: me.nickname,
+      role: me.role,
+      grade: me.grade,
+      look: me.look,
+      text,
+      color: Number.isInteger(c) && c >= 0 && c <= 4 ? c : 0,
+    });
+    io.to(plaza.channel).emit('bn', note);
+    log(`쪽지: ${me.nickname} — ${text.replace(/\n/g, ' ')}`);
+    ack({ ok: true, note });
   });
 
   socket.on('leave', () => leave(socket));
@@ -217,6 +263,7 @@ httpServer.listen(PORT, () => {
 
 function shutdown() {
   plaza.stop();
+  board.flush();
   io.close();
   httpServer.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1500).unref();

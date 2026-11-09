@@ -1,11 +1,13 @@
 /**
- * 메인 광장 씬: 맵 렌더링, 내 캐릭터 이동/전송, 다른 참가자 보간, 카메라.
+ * 메인 광장 씬: 맵 렌더링, 내 캐릭터 이동/전송, 다른 참가자 보간, 카메라,
+ * 푸드트럭·온천·게시판 상호작용 감지.
  * mode 'player' = 참가자 화면 / 'screen' = 운영자 관전 화면
  */
 import Phaser from 'phaser';
-import { MOVE_SPEED, SEND_HZ, WORLD_H, WORLD_W } from '../../../../shared/constants';
-import { WORLD, zoneAt, type Zone } from '../../../../shared/map';
-import type { Dir, PlayerInfo } from '../../../../shared/protocol';
+import { BATH_SPEED, MOVE_SPEED, SEND_HZ, WORLD_H, WORLD_W } from '../../../../shared/constants';
+import { foodDef } from '../../../../shared/foods';
+import { nearSpot, nearSpringEdge, T, WORLD, zoneAt, type TileType, type Zone } from '../../../../shared/map';
+import type { Dir, FoodId, PlayerInfo } from '../../../../shared/protocol';
 import type { Network } from '../../net/Network';
 import type { WorldStore } from '../../state/WorldStore';
 import type { WorldOverlay } from '../../ui/WorldOverlay';
@@ -14,6 +16,16 @@ import { Avatar } from '../entities/Avatar';
 import type { InputController } from '../InputController';
 import { registerStaticTextures } from '../textures';
 
+/** 지금 할 수 있는 상호작용 (HUD 버튼 표시용) */
+export interface InteractState {
+  nearFood: boolean;
+  nearSpring: boolean;
+  nearBoard: boolean;
+  bath: boolean;
+  food: FoodId | null;
+  eating: boolean;
+}
+
 export interface GameContext {
   mode: 'player' | 'screen';
   store: WorldStore;
@@ -21,6 +33,8 @@ export interface GameContext {
   overlay: WorldOverlay;
   input?: InputController;
   onZoneChange?: (zone: Zone | null) => void;
+  onInteract?: (s: InteractState) => void;
+  onBoardTap?: () => void;
   onReady?: () => void;
 }
 
@@ -35,6 +49,7 @@ export class WorldScene extends Phaser.Scene {
   private sendAcc = 0;
   private lastSent = { x: NaN, y: NaN, dir: 0 as Dir, moving: false };
   private zone: Zone | null = null;
+  private interactKey = '';
   private unsubs: (() => void)[] = [];
   screenCamMode: ScreenCamMode = 'all';
 
@@ -65,12 +80,26 @@ export class WorldScene extends Phaser.Scene {
       store.on('status', (info, status) => {
         const a = this.avatars.get(info.id);
         a?.setAway(status === 'away');
-        this.ctx.overlay.setStatus(info, info.id === store.selfId);
+        this.ctx.overlay.upsert(info, info.id === store.selfId);
       }),
       store.on('correct', (x, y) => {
         if (!this.self) return;
         this.self.setPose(x, y, this.self.dir, false);
         this.lastSent.x = NaN;
+      }),
+      store.on('patch', (info, patch) => {
+        const a = this.avatars.get(info.id);
+        if (!a) return;
+        if (patch.bath !== undefined) a.setBath(patch.bath);
+        if (patch.food !== undefined) a.setFood(patch.food);
+        if (patch.x !== undefined && patch.y !== undefined) {
+          a.setPose(patch.x, patch.y, a.dir, false);
+          if (a === this.self) this.lastSent.x = NaN;
+        }
+        this.ctx.overlay.upsert(info, info.id === store.selfId);
+      }),
+      store.on('eat', (info, food) => {
+        this.avatars.get(info.id)?.playEat(food);
       }),
     );
     this.rebuildAvatars();
@@ -89,17 +118,27 @@ export class WorldScene extends Phaser.Scene {
   private buildWorld() {
     this.add.image(0, 0, 'ground').setOrigin(0).setDepth(-10000);
     for (const p of WORLD.props) {
-      const img = this.add
-        .image(Math.round(p.x), Math.round(p.y), propTextureKey(p.kind, p.label))
-        .setOrigin(0.5, 1)
-        .setFlipX(!!p.flip)
-        .setDepth(p.flat ? -5000 + p.y : p.y);
+      const key = propTextureKey(p.kind, p.label);
+      const animated = p.kind === 'capyBath' || p.kind === 'capyRest';
+      const obj = animated
+        ? this.add.sprite(Math.round(p.x), Math.round(p.y), key, 0).play({ key: p.kind, startFrame: Math.floor(Math.random() * 2) })
+        : this.add.image(Math.round(p.x), Math.round(p.y), key);
+      obj.setOrigin(0.5, 1).setFlipX(!!p.flip).setDepth(p.flat ? -5000 + p.y : p.y);
       if (p.kind === 'campfire') this.addCampfire(p.x, p.y);
-      if (p.kind === 'portal') this.addPortal(p.x, p.y, img);
-      if (p.kind === 'lamp' || p.kind === 'lantern') this.addLampGlow(p.x, p.y - (p.kind === 'lamp' ? 36 : 17));
+      if (p.kind === 'portal') this.addPortal(p.x, p.y, obj.depth);
+      if (p.kind === 'lamp' || p.kind === 'lantern') this.addGlow(p.x, p.y - (p.kind === 'lamp' ? 36 : 17), 'glow', 0.3, 0.55);
       if (p.kind === 'crystal') this.addGlow(p.x, p.y - 10, 'glowViolet', 0.35, 0.5);
+      if (p.kind === 'capyBath') {
+        // 카피바라가 물속에서 살랑살랑
+        this.tweens.add({ targets: obj, y: obj.y + 1, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
+      }
+      if (p.kind === 'board' && this.ctx.mode === 'player') {
+        obj.setInteractive({ useHandCursor: true, pixelPerfect: false });
+        obj.on('pointerup', () => this.ctx.onBoardTap?.());
+      }
+      if (p.kind === 'foodtruck') this.addTruckLights(p.x, p.y);
     }
-    this.addWaterSparkles();
+    this.addSpringFx();
     this.addPetals();
   }
 
@@ -127,81 +166,100 @@ export class WorldScene extends Phaser.Scene {
       .setAlpha(0.55)
       .setDepth(y + 300);
     this.tweens.add({ targets: glow, alpha: 0.35, scale: 1.35, duration: 220, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
-    this.add.particles(x, y - 12, 'ember', {
-      lifespan: { min: 700, max: 1400 },
-      speedY: { min: -26, max: -12 },
-      speedX: { min: -6, max: 6 },
-      scale: { start: 1, end: 0.3 },
-      alpha: { start: 1, end: 0 },
-      frequency: 220,
-      quantity: 1,
-      blendMode: Phaser.BlendModes.ADD,
-    }).setDepth(y + 301);
-  }
-
-  private addPortal(x: number, y: number, frame: Phaser.GameObjects.Image) {
     this.add
-      .sprite(x, y - 5, 'swirl')
-      .setOrigin(0.5, 1)
-      .setDepth(frame.depth - 0.5)
-      .setAlpha(0.95)
-      .play('swirl');
+      .particles(x, y - 12, 'ember', {
+        lifespan: { min: 700, max: 1400 },
+        speedY: { min: -26, max: -12 },
+        speedX: { min: -6, max: 6 },
+        scale: { start: 1, end: 0.3 },
+        alpha: { start: 1, end: 0 },
+        frequency: 220,
+        quantity: 1,
+        blendMode: Phaser.BlendModes.ADD,
+      })
+      .setDepth(y + 301);
+  }
+
+  private addPortal(x: number, y: number, depth: number) {
+    this.add.sprite(x, y - 5, 'swirl').setOrigin(0.5, 1).setDepth(depth - 0.5).setAlpha(0.95).play('swirl');
     this.addGlow(x, y - 28, 'glowViolet', 0.45, 1.3);
-    this.add.particles(x, y - 24, 'sparkle', {
-      lifespan: 1600,
-      speedY: { min: -14, max: -5 },
-      speedX: { min: -10, max: 10 },
-      scale: { start: 0.9, end: 0 },
-      alpha: { start: 0.9, end: 0 },
-      x: { min: -16, max: 16 },
-      y: { min: -10, max: 14 },
-      frequency: 260,
-      blendMode: Phaser.BlendModes.ADD,
-    }).setDepth(y + 301);
+    this.add
+      .particles(x, y - 24, 'sparkle', {
+        lifespan: 1600,
+        speedY: { min: -14, max: -5 },
+        speedX: { min: -10, max: 10 },
+        scale: { start: 0.9, end: 0 },
+        alpha: { start: 0.9, end: 0 },
+        x: { min: -16, max: 16 },
+        y: { min: -10, max: 14 },
+        frequency: 260,
+        blendMode: Phaser.BlendModes.ADD,
+      })
+      .setDepth(y + 301);
   }
 
-  private addLampGlow(x: number, y: number) {
-    this.addGlow(x, y, 'glow', 0.3, 0.55);
+  private addTruckLights(x: number, y: number) {
+    this.addGlow(x - 6, y - 42, 'glowWarm', 0.22, 1.1);
   }
 
-  private addWaterSparkles() {
-    const pond = WORLD.zones.find((z) => z.id === 'pond')!;
-    for (let i = 0; i < 7; i++) {
-      for (let tries = 0; tries < 20; tries++) {
-        const x = pond.rect.x + Math.random() * pond.rect.w;
-        const y = pond.rect.y + Math.random() * pond.rect.h;
-        const tx = Math.floor(x / 16);
-        const ty = Math.floor(y / 16);
-        if (WORLD.tiles[ty * WORLD.cols + tx] !== 4) continue;
-        const s = this.add.image(x, y, 'sparkle').setDepth(-4500).setAlpha(0).setScale(0.8);
-        this.tweens.add({
-          targets: s,
-          alpha: { from: 0, to: 0.9 },
-          duration: 700,
-          yoyo: true,
-          repeat: -1,
-          delay: Math.random() * 3000,
-          repeatDelay: 1500 + Math.random() * 2500,
-        });
-        break;
-      }
+  /** 온천 김 + 반짝임 */
+  private addSpringFx() {
+    const spots: { x: number; y: number }[] = [];
+    for (let ty = 0; ty < WORLD.rows; ty++)
+      for (let tx = 0; tx < WORLD.cols; tx++)
+        if ((WORLD.tiles[ty * WORLD.cols + tx] as TileType) === T.SPRING) spots.push({ x: tx * 16 + 8, y: ty * 16 + 8 });
+    if (!spots.length) return;
+    const minX = Math.min(...spots.map((s) => s.x)) - 4;
+    const maxX = Math.max(...spots.map((s) => s.x)) + 4;
+    const minY = Math.min(...spots.map((s) => s.y)) - 4;
+    const maxY = Math.max(...spots.map((s) => s.y)) + 4;
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const rx = (maxX - minX) / 2;
+    const ry = (maxY - minY) / 2;
+    this.add
+      .particles(0, 0, 'steam', {
+        emitZone: { type: 'random', source: new Phaser.Geom.Ellipse(cx, cy, rx * 1.8, ry * 1.7), quantity: 1 },
+        lifespan: { min: 2200, max: 3600 },
+        speedY: { min: -10, max: -5 },
+        speedX: { min: -3, max: 3 },
+        scale: { start: 0.6, end: 1.8 },
+        alpha: { start: 0.38, end: 0 },
+        frequency: 140,
+      })
+      .setDepth(maxY + 40);
+    this.addGlow(cx, cy, 'glowWarm', 0.18, 2.4);
+    for (let i = 0; i < 6; i++) {
+      const s = spots[Math.floor(Math.random() * spots.length)];
+      const sp = this.add.image(s.x + (Math.random() - 0.5) * 10, s.y, 'sparkle').setDepth(-4500).setAlpha(0);
+      this.tweens.add({
+        targets: sp,
+        alpha: { from: 0, to: 0.9 },
+        duration: 700,
+        yoyo: true,
+        repeat: -1,
+        delay: Math.random() * 3000,
+        repeatDelay: 1500 + Math.random() * 2500,
+      });
     }
   }
 
-  /** 바람에 날리는 꽃잎 몇 장 — 분위기용, 가볍게 */
+  /** 바람에 날리는 꽃잎 — 분위기용, 가볍게 */
   private addPetals() {
-    this.add.particles(0, 0, 'mote', {
-      x: { min: 0, max: WORLD_W },
-      y: { min: 40, max: WORLD_H },
-      lifespan: 5000,
-      speedX: { min: 6, max: 16 },
-      speedY: { min: 2, max: 8 },
-      alpha: { onEmit: () => 0, onUpdate: (_p: unknown, _k: string, t: number) => Math.sin(t * Math.PI) * 0.85 },
-      tint: [0xffd3e0, 0xfff6c8, 0xffffff],
-      scale: { min: 1, max: 2 },
-      frequency: 400,
-      quantity: 1,
-    }).setDepth(9000);
+    this.add
+      .particles(0, 0, 'mote', {
+        x: { min: 0, max: WORLD_W },
+        y: { min: 40, max: WORLD_H },
+        lifespan: 5000,
+        speedX: { min: 6, max: 16 },
+        speedY: { min: 2, max: 8 },
+        alpha: { onEmit: () => 0, onUpdate: (_p: unknown, _k: string, t: number) => Math.sin(t * Math.PI) * 0.85 },
+        tint: [0xffd3e0, 0xfff6c8, 0xffffff],
+        scale: { min: 1, max: 2 },
+        frequency: 400,
+        quantity: 1,
+      })
+      .setDepth(9000);
   }
 
   // -------------------------------------------------------------- 참가자
@@ -214,12 +272,13 @@ export class WorldScene extends Phaser.Scene {
     for (const e of this.ctx.store.players.values()) this.addAvatar(e.info, false);
     this.lastSent.x = NaN;
     this.zone = null;
+    this.interactKey = '';
   }
 
   private addAvatar(info: PlayerInfo, animate: boolean) {
     if (this.avatars.has(info.id)) this.removeAvatar(info.id);
     const isSelf = info.id === this.ctx.store.selfId;
-    const a = new Avatar(this, info, isSelf);
+    const a = new Avatar(this, info, isSelf, (_kind, text) => this.ctx.overlay.bubble(info.id, text));
     this.avatars.set(info.id, a);
     this.ctx.overlay.upsert(info, isSelf);
     if (isSelf) {
@@ -252,6 +311,9 @@ export class WorldScene extends Phaser.Scene {
     if (this.ctx.mode === 'player') {
       const base = Math.min(w, h);
       cam.setZoom(base < 520 ? 2 : base < 1100 ? 3 : 4);
+      // 개발 모드 전용: ?zoom=6 처럼 확대해서 픽셀 확인
+      const forced = import.meta.env.DEV ? Number(new URLSearchParams(location.search).get('zoom')) : 0;
+      if (forced > 0) cam.setZoom(forced);
     } else {
       // 관전 화면: 위쪽 제목/인원 카드 아래에 맵이 오도록 뷰포트를 내림
       const top = h > 600 ? 108 : 86;
@@ -325,7 +387,7 @@ export class WorldScene extends Phaser.Scene {
     this.separate(dt);
     for (const [id, a] of this.avatars) {
       a.sync();
-      this.ctx.overlay.setWorldPos(id, a.displayX, a.displayY);
+      this.ctx.overlay.setWorldPos(id, a.displayX, a.displayY + a.headLift);
     }
 
     if (this.ctx.mode === 'screen') this.updateScreenCamera(dt);
@@ -333,14 +395,18 @@ export class WorldScene extends Phaser.Scene {
 
   private updateSelf(dt: number) {
     const self = this.self!;
-    const v = this.ctx.input?.vector() ?? { x: 0, y: 0 };
+    const grid = self.bath ? WORLD.bathGrid : WORLD.collision;
+    const raw = this.ctx.input?.vector() ?? { x: 0, y: 0 };
+    // 먹는 동안에는 잠깐 멈춤
+    const v = self.eating ? { x: 0, y: 0 } : raw;
     const moving = v.x !== 0 || v.y !== 0;
-    let dx = v.x * MOVE_SPEED * dt;
-    let dy = v.y * MOVE_SPEED * dt;
+    const speed = MOVE_SPEED * (self.bath ? BATH_SPEED : 1);
+    let dx = v.x * speed * dt;
+    let dy = v.y * speed * dt;
 
     // 다른 캐릭터와 너무 붙으면 살짝 밀려남
     for (const a of this.avatars.values()) {
-      if (a === self || a.away) continue;
+      if (a === self || a.away || a.bath !== self.bath) continue;
       const ox = self.x - a.x;
       const oy = self.y - a.y;
       const d = Math.hypot(ox, oy);
@@ -358,7 +424,7 @@ export class WorldScene extends Phaser.Scene {
       if (Math.abs(v.x) > Math.abs(v.y) + 0.05) dir = v.x < 0 ? 2 : 3;
       else dir = v.y < 0 ? 1 : 0;
     }
-    const next = dx || dy ? WORLD.collision.move(self.x, self.y, dx, dy) : { x: self.x, y: self.y };
+    const next = dx || dy ? grid.move(self.x, self.y, dx, dy) : { x: self.x, y: self.y };
     self.setPose(next.x, next.y, dir, moving);
 
     // 서버 전송 (변화가 있을 때만, 초당 SEND_HZ회)
@@ -381,6 +447,21 @@ export class WorldScene extends Phaser.Scene {
     if (z !== this.zone) {
       this.zone = z;
       this.ctx.onZoneChange?.(z);
+    }
+
+    // 상호작용 가능 여부 (바뀔 때만 HUD 에 알림)
+    const st: InteractState = {
+      nearFood: !self.bath && nearSpot(WORLD.spots.foodtruck, self.x, self.y),
+      nearSpring: !self.bath && nearSpringEdge(self.x, self.y),
+      nearBoard: !self.bath && nearSpot(WORLD.spots.board, self.x, self.y),
+      bath: self.bath,
+      food: self.food,
+      eating: self.eating,
+    };
+    const key = JSON.stringify(st);
+    if (key !== this.interactKey) {
+      this.interactKey = key;
+      this.ctx.onInteract?.(st);
     }
   }
 
@@ -418,6 +499,11 @@ export class WorldScene extends Phaser.Scene {
       a.sepX += (tx - a.sepX) * k;
       a.sepY += (ty - a.sepY) * k;
     }
+  }
+
+  /** 내 캐릭터의 음식 정보 (메뉴 표시용) */
+  selfFood() {
+    return foodDef(this.self?.food);
   }
 
   private renderOverlay() {

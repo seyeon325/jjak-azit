@@ -23,5 +23,16 @@ export const COLLISION_CELL = 8;
 export const NICK_MIN = 1;
 export const NICK_MAX = 10;
 
-export const LOOK_COUNT = 8;
+/** 캐릭터 종류 수 */
+export const LOOK_COUNT = 12;
+/** (이전 버전 호환용) 옷 색상 번호 범위 — 현재 UI 에서는 사용하지 않음 */
 export const COLOR_COUNT = 8;
+
+/** 온천 안에서의 이동 속도 배율 */
+export const BATH_SPEED = 0.5;
+/** 음식을 먹는 데 걸리는 시간 */
+export const EAT_MS = 2200;
+/** 상호작용 버튼이 나타나는 거리 (px) */
+export const INTERACT_RANGE = 40;
+/** 게시판 쪽지 최대 글자 수 */
+export const NOTE_MAX = 60;

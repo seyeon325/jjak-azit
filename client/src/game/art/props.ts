@@ -4,6 +4,7 @@
  */
 import type { PropKind } from '../../../../shared/map';
 import { P } from './palette';
+import * as V2 from './props-v2';
 import { drawPixelText, hash2, measurePixelText, mix, PixelCanvas, PIXEL_FONT } from './pixel';
 
 const OUT = P.ink;
@@ -185,60 +186,6 @@ function bench(): PixelCanvas {
   // 다리
   pc.rect(3, 13, 2, 4, P.slate);
   pc.rect(25, 13, 2, 4, P.slate);
-  pc.outline(OUT);
-  return pc;
-}
-
-function board(): PixelCanvas {
-  const pc = new PixelCanvas(90, 64);
-  // 기둥
-  pc.rect(8, 12, 4, 50, P.woodDark);
-  pc.rect(78, 12, 4, 50, P.woodDark);
-  pc.vline(8, 12, 61, P.wood);
-  pc.vline(78, 12, 61, P.wood);
-  // 프레임
-  pc.rect(3, 5, 84, 44, P.wood);
-  pc.hline(3, 86, 5, P.woodLight);
-  pc.hline(3, 86, 48, P.woodDeep);
-  pc.rect(6, 20, 78, 26, '#e7c193');
-  for (let y = 20; y < 46; y++)
-    for (let x = 6; x < 84; x++) {
-      const n = hash2(x, y, 5);
-      if (n > 0.86) pc.set(x, y, '#d7ad7c');
-      else if (n < 0.06) pc.set(x, y, '#f1d3ad');
-    }
-  pc.hline(6, 83, 20, '#c99a68');
-  // 머리판
-  pc.rect(7, 7, 76, 12, P.cream);
-  pc.hline(7, 82, 18, P.cream2);
-  drawPixelText(pc, '메시지 게시판', 45, 7, P.ink);
-  // 쪽지들 (빈 쪽지 — 2차에서 실제 메시지가 붙을 자리)
-  const notes: [number, number, string][] = [
-    [10, 23, P.lemon],
-    [24, 26, P.mint],
-    [39, 23, P.skyLight],
-    [54, 27, P.pink],
-    [68, 23, '#fff6e4'],
-    [15, 35, P.lavenderLight],
-    [33, 36, P.coralLight],
-    [61, 36, P.lemon],
-  ];
-  for (const [x, y, c] of notes) {
-    pc.rect(x, y, 12, 9, c);
-    pc.hline(x, x + 11, y + 8, mix(c, '#7a5a5a', 0.25));
-    pc.hline(x + 2, x + 8, y + 3, mix(c, '#6d5a72', 0.35));
-    pc.hline(x + 2, x + 6, y + 5, mix(c, '#6d5a72', 0.35));
-    pc.set(x + 5, y, P.coralDark);
-    pc.set(x + 6, y, P.coralDark);
-  }
-  // 준비 중 꼬리표
-  const tagW = measurePixelText('준비 중', PIXEL_FONT) + 10;
-  const tx = 45 - Math.floor(tagW / 2);
-  pc.rect(tx, 50, tagW, 13, P.lemon);
-  pc.hline(tx, tx + tagW - 1, 62, P.lemonDark);
-  pc.vline(tx + 3, 47, 49, P.slate);
-  pc.vline(tx + tagW - 4, 47, 49, P.slate);
-  drawPixelText(pc, '준비 중', 45, 50, P.ink);
   pc.outline(OUT);
   return pc;
 }
@@ -656,17 +603,6 @@ function door(): PixelCanvas {
   return pc;
 }
 
-function lily(): PixelCanvas {
-  const pc = new PixelCanvas(16, 10);
-  pc.ellipse(8, 5, 6.5, 3.6, (dx, dy) => (dx > 0.1 && Math.abs(dy) < 0.25 ? null : dy > 0.3 ? '#5fae62' : '#7cc96a'));
-  pc.set(6, 3, P.pink);
-  pc.set(7, 3, P.pink);
-  pc.set(6, 4, '#ffffff');
-  pc.set(7, 2, P.pink);
-  pc.outline('#4f8b6b');
-  return pc;
-}
-
 function reed(): PixelCanvas {
   const pc = new PixelCanvas(14, 20);
   pc.vline(4, 6, 18, P.leafDark);
@@ -697,6 +633,13 @@ export function buildProp(kind: PropKind, label?: string): PropArt {
   const key = propTextureKey(kind, label);
   const hit = cache.get(key);
   if (hit) return hit;
+  // 애니메이션 소품 (가로 프레임 시트)
+  if (kind === 'capyBath' || kind === 'capyRest') {
+    const sh = kind === 'capyBath' ? V2.capyBathSheet() : V2.capyRestSheet();
+    const art = { canvas: sh.canvas, frames: { w: sh.w, h: sh.h, count: sh.count } };
+    cache.set(key, art);
+    return art;
+  }
   let pc: PixelCanvas;
   switch (kind) {
     case 'tree':
@@ -718,7 +661,7 @@ export function buildProp(kind: PropKind, label?: string): PropArt {
       pc = bench();
       break;
     case 'board':
-      pc = board();
+      pc = V2.board();
       break;
     case 'pot':
       pc = pot();
@@ -771,8 +714,23 @@ export function buildProp(kind: PropKind, label?: string): PropArt {
     case 'door':
       pc = door();
       break;
-    case 'lily':
-      pc = lily();
+    case 'foodtruck':
+      pc = V2.foodTruck();
+      break;
+    case 'bunting':
+      pc = V2.bunting();
+      break;
+    case 'picnic':
+      pc = V2.picnic();
+      break;
+    case 'menuSign':
+      pc = V2.menuSign();
+      break;
+    case 'bucket':
+      pc = V2.bucket();
+      break;
+    case 'fern':
+      pc = V2.fern();
       break;
     case 'reed':
       pc = reed();
@@ -839,7 +797,13 @@ export const PROP_SHADOW: Partial<Record<PropKind, [number, number]>> = {
   bush: [8, 3],
   lamp: [5, 2],
   bench: [13, 3],
-  board: [38, 4],
+  board: [40, 4],
+  foodtruck: [48, 5],
+  picnic: [20, 4],
+  menuSign: [10, 2],
+  capyRest: [13, 3],
+  bucket: [6, 2],
+  fern: [6, 2],
   pot: [6, 2],
   sign: [5, 2],
   campfire: [13, 4],

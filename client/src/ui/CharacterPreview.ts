@@ -1,7 +1,9 @@
 /** 로그인 화면·메뉴에서 쓰는 캐릭터 미리보기 (Phaser 없이 캔버스로) */
 import { buildCharacterSheet, FRAME_H, FRAME_W } from '../game/art/characters';
 
-type Pose = 'idle' | 'walk' | 'tour';
+export type PreviewPose = 'idle' | 'walk' | 'tour';
+/** 0 정면 · 1 뒤 · 2 왼쪽 · 3 오른쪽 */
+export type PreviewDir = 0 | 1 | 2 | 3;
 
 const live = new Set<CharacterPreview>();
 let raf = 0;
@@ -15,12 +17,12 @@ export class CharacterPreview {
   private ctx: CanvasRenderingContext2D;
   private sheet: HTMLCanvasElement;
   private offset = Math.random() * 3000;
+  dir: PreviewDir = 0;
 
   constructor(
     private look: number,
-    private color: number,
     private scale = 3,
-    private pose: Pose = 'idle',
+    public pose: PreviewPose = 'idle',
   ) {
     this.canvas = document.createElement('canvas');
     this.canvas.width = FRAME_W * scale;
@@ -28,36 +30,31 @@ export class CharacterPreview {
     this.canvas.className = 'char-preview';
     this.ctx = this.canvas.getContext('2d')!;
     this.ctx.imageSmoothingEnabled = false;
-    this.sheet = buildCharacterSheet(look, color);
+    this.sheet = buildCharacterSheet(look);
     live.add(this);
     if (!raf) raf = requestAnimationFrame(loop);
     this.draw(performance.now());
   }
 
-  set(look: number, color: number) {
-    if (look === this.look && color === this.color) return;
+  set(look: number) {
+    if (look === this.look) return;
     this.look = look;
-    this.color = color;
-    this.sheet = buildCharacterSheet(look, color);
+    this.sheet = buildCharacterSheet(look);
   }
 
   draw(t: number) {
     if (!this.canvas.isConnected) return;
     const tt = t + this.offset;
-    let row = 0;
-    let col = 0;
-    let flip = false;
-    if (this.pose === 'idle') {
-      col = tt % 2800 < 140 ? 1 : 0;
-    } else if (this.pose === 'walk') {
-      col = 2 + (Math.floor(tt / 110) % 4);
-    } else {
-      // 방향을 돌며 걷기: 아래 → 왼쪽 → 위 → 오른쪽
-      const seg = Math.floor(tt / 1600) % 4;
-      row = [0, 2, 1, 2][seg];
-      flip = seg === 3;
-      col = 2 + (Math.floor(tt / 110) % 4);
+    let dir: PreviewDir = this.dir;
+    let walking = this.pose === 'walk';
+    if (this.pose === 'tour') {
+      // 방향을 돌며 걷기: 정면 → 왼쪽 → 뒤 → 오른쪽
+      dir = ([0, 2, 1, 3] as PreviewDir[])[Math.floor(tt / 1600) % 4];
+      walking = true;
     }
+    const row = dir === 0 ? 0 : dir === 1 ? 1 : 2;
+    const flip = dir === 3;
+    const col = walking ? 2 + (Math.floor(tt / 110) % 4) : tt % 2800 < 140 ? 1 : 0;
     const c = this.ctx;
     c.clearRect(0, 0, this.canvas.width, this.canvas.height);
     c.save();

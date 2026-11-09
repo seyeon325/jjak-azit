@@ -1,10 +1,24 @@
 /** 참가자 게임 화면 UI: 상단 바, 구역 안내, 입·퇴장 알림, 연결 상태, 메뉴 */
+import { foodDef, gradeLabel } from '../../../shared/foods';
 import { WORLD, type Zone } from '../../../shared/map';
-import type { PlayerInfo } from '../../../shared/protocol';
+import type { FoodId, PlayerInfo } from '../../../shared/protocol';
 import { LOOKS } from '../game/art/characters';
+import type { InteractState } from '../game/scenes/WorldScene';
+import type { Network } from '../net/Network';
 import type { WorldStore } from '../state/WorldStore';
+import { ActionBar } from './ActionBar';
+import { openBoard } from './BoardPanel';
 import { CharacterPreview } from './CharacterPreview';
-import { h, icon, logoMark, roleLabel } from './dom';
+import { h, icon, ICON, logoMark, roleLabel } from './dom';
+import { openFoodMenu } from './FoodMenu';
+import type { Sheet } from './Sheet';
+
+/** 받침에 따라 을/를 */
+function objectParticle(word: string) {
+  const c = word.charCodeAt(word.length - 1) - 0xac00;
+  if (c < 0 || c > 11171) return '을(를)';
+  return c % 28 ? '을' : '를';
+}
 
 export type ConnState = 'ok' | 'lost' | 'restoring' | 'restored' | 'error';
 
@@ -23,8 +37,12 @@ export class Hud {
   private unsubs: (() => void)[] = [];
   private seenZones = new Set<string>();
 
+  private actionBar: ActionBar;
+  private panel: Sheet | null = null;
+
   constructor(
     private store: WorldStore,
+    private net: Network,
     private actions: { onRecreate: () => void },
   ) {
     this.count = h('span', { class: 'count-num' }, String(store.onlineCount));
@@ -32,6 +50,12 @@ export class Hud {
     this.zoneCard = h('div', { class: 'zone-card hidden', onclick: () => this.zoneCard.classList.add('hidden') });
     this.toasts = h('div', { class: 'toasts', 'aria-live': 'polite' });
     this.conn = h('div', { class: 'conn hidden', role: 'status' });
+    this.actionBar = new ActionBar({
+      onMenu: () => this.openFood(),
+      onEat: () => this.act({ t: 'eat' }),
+      onBath: (on) => this.act({ t: 'bath', on }),
+      onBoard: () => this.openBoardPanel(),
+    });
 
     const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 
@@ -58,6 +82,7 @@ export class Hud {
       this.conn,
       this.zoneCard,
       this.toasts,
+      this.actionBar.el,
       !isTouch ? h('div', { class: 'key-hint' }, h('kbd', {}, 'W A S D'), ' 또는 ', h('kbd', {}, '방향키'), '로 이동') : null,
     );
 
@@ -76,6 +101,12 @@ export class Hud {
         ),
       ),
       store.on('status', () => this.refreshMenu()),
+      store.on('patch', (p) => {
+        if (p.id === store.selfId) this.refreshMenu();
+      }),
+      store.on('note', (n) => {
+        if (n.nickname !== store.self?.nickname) this.toast(`${n.nickname} 님이 게시판에 쪽지를 남겼어요`, 'info');
+      }),
     );
   }
 
@@ -99,6 +130,39 @@ export class Hud {
     const first = !this.seenZones.has(z.id);
     this.seenZones.add(z.id);
     this.zoneTimer = window.setTimeout(() => this.zoneCard.classList.add('hidden'), first ? 4200 : 2400);
+  }
+
+  // -------------------------------------------------------------- 상호작용
+
+  setInteract(s: InteractState) {
+    this.actionBar.update(s);
+  }
+
+  private async act(req: Parameters<Network['act']>[0]) {
+    const res = await this.net.act(req);
+    if (!res.ok) this.toast(res.reason, 'info');
+  }
+
+  private openFood() {
+    if (this.panel?.isOpen) return;
+    this.actionBar.suspend(true);
+    this.panel = openFoodMenu(
+      this.el,
+      async (id: FoodId) => {
+        const res = await this.net.act({ t: 'food', food: id });
+        if (!res.ok) return res.reason;
+        const name = foodDef(id)?.name ?? '';
+        this.toast(`${name}${objectParticle(name)} 받았어요! ‘먹기’를 눌러 먹어요`, 'info');
+        return null;
+      },
+      () => this.actionBar.suspend(false),
+    );
+  }
+
+  openBoardPanel() {
+    if (this.panel?.isOpen) return;
+    this.actionBar.suspend(true);
+    this.panel = openBoard(this.el, this.net, this.store, () => this.actionBar.suspend(false));
   }
 
   // -------------------------------------------------------------- 알림
@@ -162,7 +226,7 @@ export class Hud {
         ),
       );
       this.el.append(this.menu);
-      requestAnimationFrame(() => this.menu?.classList.add('open'));
+      setTimeout(() => this.menu?.classList.add('open'), 16);
     }
     this.refreshMenu();
   }
@@ -213,7 +277,7 @@ export class Hud {
 
   private guideView() {
     const isTouch = matchMedia('(pointer: coarse)').matches;
-    const order = ['plaza', 'board', 'campfire', 'playground', 'portal'];
+    const order = ['plaza', 'board', 'foodtruck', 'spring', 'campfire', 'playground', 'portal'];
     const zones = order.map((id) => WORLD.zones.find((z) => z.id === id)!).filter(Boolean);
     return h(
       'div',
@@ -224,6 +288,7 @@ export class Hud {
         { class: 'muted' },
         isTouch ? '화면 왼쪽 아래를 엄지로 누른 채 원하는 방향으로 밀어보세요.' : 'W A S D 또는 방향키로 이동해요. 휴대폰에서는 화면 왼쪽 아래 조이스틱을 쓰면 돼요.',
       ),
+      h('p', { class: 'muted' }, '푸드트럭·온천·게시판 가까이 가면 오른쪽 아래에 버튼이 나타나요.' + (isTouch ? '' : ' (E 키로도 누를 수 있어요)')),
       h('h3', {}, '아지트 둘러보기'),
       h(
         'ul',
@@ -241,8 +306,8 @@ export class Hud {
       h(
         'ol',
         { class: 'roadmap' },
-        h('li', { class: 'done' }, h('b', {}, '1차'), ' 아지트 공간 · 캐릭터 · 실시간 이동'),
-        h('li', {}, h('b', {}, '2차'), ' 메시지 게시판 · 대화 · 놀이터 장난 기믹'),
+        h('li', { class: 'done' }, h('b', {}, '1차'), ' 아지트 공간 · 캐릭터 · 실시간 이동 · 게시판 · 푸드트럭 · 온천'),
+        h('li', {}, h('b', {}, '2차'), ' 대화 · 놀이터 장난 기믹 · 포즈와 춤'),
         h('li', {}, h('b', {}, '3차'), " '과제 괴물' 협동 레이드"),
       ),
     );
@@ -255,13 +320,14 @@ export class Hud {
         .filter((p) => p.role === role)
         .sort((a, b) => Number(b.id === this.store.selfId) - Number(a.id === this.store.selfId) || a.joinedAt - b.joinedAt);
     const row = (p: PlayerInfo) => {
-      const pv = new CharacterPreview(p.look, p.color, 2, 'idle');
+      const pv = new CharacterPreview(p.look, 2, 'idle');
       this.previews.push(pv);
       return h(
         'li',
         { class: p.status === 'away' ? 'away' : '' },
         h('span', { class: 'mini' }, pv.canvas),
-        h('span', { class: 'who' }, p.nickname, p.id === this.store.selfId ? h('em', { class: 'me-tag' }, '나') : null),
+        h('span', { class: 'who' }, h('small', { class: 'grade' }, gradeLabel(p.grade)), p.nickname, p.id === this.store.selfId ? h('em', { class: 'me-tag' }, '나') : null),
+        p.food ? h('span', { class: 'muted small' }, foodDef(p.food)?.name ?? '') : p.bath ? h('span', { class: 'muted small' }, '♨ 온천') : null,
         p.status === 'away' ? h('span', { class: 'muted small' }, '연결 끊김') : null,
       );
     };
@@ -280,13 +346,13 @@ export class Hud {
   private meView() {
     const me = this.store.self;
     if (!me) return h('p', { class: 'muted' }, '캐릭터 정보를 불러오는 중이에요');
-    const pv = new CharacterPreview(me.look, me.color, 5, 'tour');
+    const pv = new CharacterPreview(me.look, 5, 'tour');
     this.previews.push(pv);
     const fsSupported = !!document.documentElement.requestFullscreen;
     return h(
       'div',
       { class: 'me' },
-      h('div', { class: 'me-card' }, h('div', { class: 'me-stage' }, pv.canvas), h('div', {}, h('div', { class: `plate static ${me.role}` }, h('span', { class: 'plate-role' }, roleLabel(me.role)), h('span', { class: 'plate-name' }, me.nickname)), h('p', { class: 'muted' }, `${LOOKS[me.look]?.name ?? ''} 스타일`))),
+      h('div', { class: 'me-card' }, h('div', { class: 'me-stage' }, pv.canvas), h('div', {}, h('div', { class: `plate static ${me.role}` }, h('span', { class: 'plate-role' }, h('i', { html: me.role === 'senior' ? ICON.crown : ICON.sprout }), gradeLabel(me.grade)), h('span', { class: 'plate-name' }, me.nickname)), h('p', { class: 'muted' }, `${roleLabel(me.role)} · ${LOOKS[me.look]?.name ?? ''}`), h('p', { class: 'muted small' }, LOOKS[me.look]?.desc ?? ''))),
       fsSupported
         ? h(
             'button',
@@ -318,6 +384,8 @@ export class Hud {
   }
 
   destroy() {
+    this.actionBar.destroy();
+    this.panel?.close();
     this.unsubs.forEach((u) => u());
     this.closeMenu();
     this.el.remove();

@@ -21,6 +21,7 @@ const PRIORITY: Record<number, number> = {
   [T.PLAZA]: 5,
   [T.DECK]: 6,
   [T.WATER]: -1,
+  [T.SPRING]: -1,
   [T.WALL]: 9,
 };
 
@@ -188,6 +189,15 @@ export function bakeGround(): HTMLCanvasElement {
           if (wave > 0.96 && n > 0.3) c = P.waterLight;
           break;
         }
+        case T.SPRING: {
+          // 따뜻한 온천물 (청록 + 살짝 복숭아빛 반짝임)
+          const depth = valueNoise(x, y, 12, 4);
+          c = depth > 0.6 ? '#7fd3c5' : depth > 0.34 ? '#93ded0' : '#a8e7d9';
+          const wave = Math.sin(x * 0.3 + Math.sin(y * 0.7) * 2 + y * 1.1);
+          if (wave > 0.95 && n > 0.35) c = '#d8f7ef';
+          else if (n > 0.996) c = '#ffe4d3';
+          break;
+        }
         case T.WALL:
         default:
           c = P.plaster;
@@ -199,8 +209,9 @@ export function bakeGround(): HTMLCanvasElement {
   for (let y = 0; y < H; y++)
     for (let x = 0; x < W; x++) {
       const t = ter[y * W + x];
-      if (t === T.WALL) continue;
+      if (t === T.WALL || t === T.SPRING) continue;
       const nb = [terAt(x - 1, y), terAt(x + 1, y), terAt(x, y - 1), terAt(x, y + 1)];
+      if (nb.some((v) => v === T.SPRING)) continue;
       if (t === T.WATER) {
         // 물가 하이라이트
         if (nb.some((v) => v !== T.WATER && v !== T.DECK)) pc.set(x, y, '#d9f4fe');
@@ -222,6 +233,67 @@ export function bakeGround(): HTMLCanvasElement {
         if (PRIORITY[terAt(x, y - 1)] > 0 && terAt(x, y - 1) !== T.WALL) pc.set(x, y, P.grassDark);
       }
     }
+
+  // 3-2) 온천 돌 테두리 (물에서 6px 이내의 땅을 돌로)
+  {
+    const RIM_W = 6;
+    const dist = new Uint8Array(W * H).fill(255);
+    let frontier: number[] = [];
+    for (let i = 0; i < W * H; i++)
+      if (ter[i] === T.SPRING) {
+        dist[i] = 0;
+        frontier.push(i);
+      }
+    for (let d = 1; d <= RIM_W && frontier.length; d++) {
+      const next: number[] = [];
+      for (const i of frontier) {
+        const x = i % W;
+        const y = (i / W) | 0;
+        for (const [nx, ny] of [
+          [x - 1, y],
+          [x + 1, y],
+          [x, y - 1],
+          [x, y + 1],
+        ]) {
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          const j = ny * W + nx;
+          if (dist[j] !== 255) continue;
+          dist[j] = d;
+          next.push(j);
+        }
+      }
+      frontier = next;
+    }
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        const d = dist[i];
+        if (ter[i] === T.SPRING) {
+          // 물가 거품
+          let edge = 0;
+          for (const [nx, ny] of [
+            [x - 1, y],
+            [x + 1, y],
+            [x, y - 1],
+            [x, y + 1],
+          ])
+            if (terAt(nx, ny) !== T.SPRING) edge = 1;
+          if (edge) pc.set(x, y, '#ecfcf8');
+          continue;
+        }
+        if (d === 255 || ter[i] === T.WALL) continue;
+        const row = Math.floor(y / 5);
+        const sx = x + (row % 2) * 3;
+        const tone = hash2(Math.floor(sx / 6), row, 31);
+        let c = tone > 0.66 ? '#dbd2c6' : tone > 0.33 ? '#c9bfb2' : '#b8ac9f';
+        const seam = sx % 6 === 0 || y % 5 === 0;
+        if (seam) c = '#9a8e81';
+        else if (sx % 6 === 1 && y % 5 === 1) c = '#ede7dd';
+        if (d === 1) c = '#8c8175';
+        if (d === RIM_W) c = '#867a6e';
+        pc.set(x, y, c);
+      }
+  }
 
   // 4) 풀 장식 (풀잎·꽃)
   const deco = (tx: number, ty: number) => {

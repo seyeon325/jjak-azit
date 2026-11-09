@@ -2,7 +2,7 @@
  * 메인 광장 맵 정의 (클라이언트 렌더링 + 서버 충돌 검사 공용).
  * 좌표 단위: 타일(16px) 또는 픽셀. 함수 이름에 명시합니다.
  */
-import { COLLISION_CELL, FOOT_H, FOOT_W, MAP_COLS, MAP_ROWS, TILE, WORLD_H, WORLD_W } from './constants';
+import { COLLISION_CELL, FOOT_H, FOOT_W, INTERACT_RANGE, MAP_COLS, MAP_ROWS, TILE, WORLD_H, WORLD_W } from './constants';
 
 export const T = {
   GRASS: 0,
@@ -14,6 +14,8 @@ export const T = {
   DECK: 6,
   STONE: 7,
   DIRT: 8,
+  /** 온천물 */
+  SPRING: 9,
 } as const;
 export type TileType = (typeof T)[keyof typeof T];
 
@@ -42,8 +44,15 @@ export type PropKind =
   | 'barrier'
   | 'banner'
   | 'door'
-  | 'lily'
-  | 'reed';
+  | 'reed'
+  | 'foodtruck'
+  | 'bunting'
+  | 'picnic'
+  | 'menuSign'
+  | 'capyBath'
+  | 'capyRest'
+  | 'bucket'
+  | 'fern';
 
 export interface Prop {
   kind: PropKind;
@@ -58,9 +67,11 @@ export interface Prop {
   label?: string;
   /** 바닥에 깔리는 장식 (항상 캐릭터 아래) */
   flat?: boolean;
+  /** 온천 안 소품 (온천 이동 충돌에만 적용) */
+  inBath?: boolean;
 }
 
-export type ZoneId = 'plaza' | 'board' | 'campfire' | 'playground' | 'portal' | 'pond';
+export type ZoneId = 'plaza' | 'board' | 'foodtruck' | 'campfire' | 'playground' | 'portal' | 'spring';
 
 export interface Zone {
   id: ZoneId;
@@ -74,14 +85,25 @@ export interface Zone {
   label: { x: number; y: number };
 }
 
+/** 상호작용 지점 */
+export interface Spot {
+  x: number;
+  y: number;
+  r: number;
+}
+
 export interface WorldMap {
   cols: number;
   rows: number;
   tiles: Uint8Array;
   props: Prop[];
   zones: Zone[];
+  /** 걸어 다닐 때의 충돌 */
   collision: CollisionGrid;
+  /** 온천 안에서의 충돌 (물 안쪽만 이동 가능) */
+  bathGrid: CollisionGrid;
   spawn: { x: number; y: number; w: number; h: number };
+  spots: { foodtruck: Spot; board: Spot; spring: Spot };
 }
 
 // ---------------------------------------------------------------- 충돌 격자
@@ -95,12 +117,18 @@ export class CollisionGrid {
     this.rows = Math.ceil(worldH / cell);
     this.data = new Uint8Array(this.cols * this.rows);
   }
-  blockRect(x: number, y: number, w: number, h: number) {
+  private fillRect(x: number, y: number, w: number, h: number, v: 0 | 1) {
     const c0 = Math.max(0, Math.floor(x / this.cell));
     const r0 = Math.max(0, Math.floor(y / this.cell));
     const c1 = Math.min(this.cols - 1, Math.floor((x + w - 0.001) / this.cell));
     const r1 = Math.min(this.rows - 1, Math.floor((y + h - 0.001) / this.cell));
-    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) this.data[r * this.cols + c] = 1;
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) this.data[r * this.cols + c] = v;
+  }
+  blockRect(x: number, y: number, w: number, h: number) {
+    this.fillRect(x, y, w, h, 1);
+  }
+  clearRect(x: number, y: number, w: number, h: number) {
+    this.fillRect(x, y, w, h, 0);
   }
   blockedAt(px: number, py: number): boolean {
     if (px < 0 || py < 0 || px >= this.worldW || py >= this.worldH) return true;
@@ -151,6 +179,24 @@ export class CollisionGrid {
       }
     }
     return { x: nx, y: ny };
+  }
+  /** (x,y) 에서 가장 가까운 설 수 있는 위치 */
+  nearest(x: number, y: number, maxR = 72): { x: number; y: number } | null {
+    if (this.canStand(x, y)) return { x, y };
+    for (let r = 2; r <= maxR; r += 2) {
+      let best: { x: number; y: number; d: number } | null = null;
+      const steps = Math.max(8, Math.round(r * 1.5));
+      for (let i = 0; i < steps; i++) {
+        const a = (i / steps) * Math.PI * 2;
+        const cx = Math.round(x + Math.cos(a) * r);
+        const cy = Math.round(y + Math.sin(a) * r);
+        if (!this.canStand(cx, cy)) continue;
+        const d = Math.hypot(cx - x, cy - y);
+        if (!best || d < best.d) best = { x: cx, y: cy, d };
+      }
+      if (best) return { x: best.x, y: best.y };
+    }
+    return null;
   }
 }
 
@@ -206,20 +252,19 @@ function buildMap(): WorldMap {
   // 길
   fill(29, 3, 2, 9, T.PATH); // 광장 → 본관
   fill(12, 16, 11, 2, T.PATH); // 광장 → 서쪽
-  fill(10, 8, 2, 10, T.PATH); // → 게시판
+  fill(10, 9, 2, 9, T.PATH); // → 푸드트럭
   fill(10, 16, 2, 7, T.PATH); // → 모닥불
   fill(37, 16, 12, 2, T.PATH); // 광장 → 동쪽
   fill(48, 11, 2, 7, T.PATH); // → 포털
   fill(48, 16, 2, 6, T.PATH); // → 놀이터
-  fill(29, 23, 2, 3, T.PATH); // → 연못
+  fill(29, 23, 2, 2, T.PATH); // → 온천
 
   roundRect(23, 12, 14, 11, 2.2, T.PLAZA); // 중앙 광장
-  fill(5, 3, 12, 6, T.DECK); // 게시판 앞 나무 데크
+  fill(4, 3, 14, 7, T.DECK); // 푸드트럭 앞 나무 데크
   ellipse(11, 26.5, 4.6, 3.8, T.DIRT); // 모닥불 터
   roundRect(41, 21, 16, 10, 2.5, T.SAND); // 놀이터 모래밭
   ellipse(49, 8.5, 4.8, 4, T.STONE); // 포털 단상
-  ellipse(30.5, 28.6, 5.6, 2.9, T.WATER); // 연못
-  fill(29, 25, 2, 2, T.DECK); // 연못 선착장
+  ellipse(30, 28.6, 4.6, 3.05, T.SPRING); // 카피바라 온천
 
   // ------------------------------------------------------------ 소품
   const props: Prop[] = [];
@@ -229,7 +274,7 @@ function buildMap(): WorldMap {
   add({ kind: 'banner', x: px(30), y: px(1) + 8, flat: true });
   add({ kind: 'door', x: px(30), y: px(3), flat: true });
 
-  // 중앙 광장
+  // 중앙 광장 + 게시판
   for (const [x, y] of [
     [px(23) + 10, px(12) + 14],
     [px(37) - 10, px(12) + 14],
@@ -237,16 +282,20 @@ function buildMap(): WorldMap {
     [px(37) - 10, px(23) - 6],
   ])
     add({ kind: 'lamp', x, y, foot: [6, 4] });
-  add({ kind: 'bench', x: px(26) + 8, y: px(13) + 2, foot: [24, 6] });
-  add({ kind: 'bench', x: px(34) - 8, y: px(13) + 2, foot: [24, 6] });
+  add({ kind: 'board', x: px(30), y: px(15) + 2, foot: [74, 8] });
+  add({ kind: 'bench', x: px(25) + 8, y: px(13) + 2, foot: [24, 6] });
+  add({ kind: 'bench', x: px(35) - 8, y: px(13) + 2, foot: [24, 6] });
   add({ kind: 'bench', x: px(26) + 8, y: px(22) + 4, foot: [24, 6] });
   add({ kind: 'bench', x: px(34) - 8, y: px(22) + 4, foot: [24, 6] });
 
-  // 게시판
-  add({ kind: 'board', x: px(11), y: px(5) + 10, foot: [76, 8] });
-  add({ kind: 'pot', x: px(5) + 10, y: px(5) + 4, foot: [10, 5] });
-  add({ kind: 'pot', x: px(17) - 10, y: px(5) + 4, foot: [10, 5] });
-  add({ kind: 'sign', x: px(13) + 6, y: px(11) + 2, foot: [4, 4], label: '메시지 게시판' });
+  // 푸드트럭 존
+  add({ kind: 'bunting', x: px(11), y: px(3) + 10 });
+  add({ kind: 'foodtruck', x: px(11), y: px(6) + 8, foot: [90, 16] });
+  add({ kind: 'menuSign', x: px(4) + 12, y: px(8) + 2, foot: [14, 5] });
+  add({ kind: 'picnic', x: px(6), y: px(11) + 4, foot: [34, 10] });
+  add({ kind: 'picnic', x: px(16), y: px(11) + 4, foot: [34, 10], flip: true });
+  add({ kind: 'pot', x: px(17) + 10, y: px(7) + 6, foot: [10, 5] });
+  add({ kind: 'sign', x: px(13) + 6, y: px(13) + 4, foot: [4, 4], label: '푸드트럭' });
 
   // 모닥불 쉼터
   const fx = px(11) + 8;
@@ -276,12 +325,14 @@ function buildMap(): WorldMap {
   add({ kind: 'crystal', x: px(54) + 10, y: px(9) + 4, foot: [8, 5], flip: true });
   add({ kind: 'sign', x: px(46) + 6, y: px(14), foot: [4, 4], label: '게임 포털' });
 
-  // 연못
-  add({ kind: 'lily', x: px(27) + 4, y: px(28) + 6, flat: true });
-  add({ kind: 'lily', x: px(33), y: px(29) + 4, flat: true, flip: true });
-  add({ kind: 'lily', x: px(32) + 2, y: px(27) + 8, flat: true });
-  add({ kind: 'reed', x: px(25) + 6, y: px(28) + 2 });
-  add({ kind: 'reed', x: px(35) + 10, y: px(29) + 4, flip: true });
+  // 카피바라 온천
+  add({ kind: 'capyBath', x: px(33) + 4, y: px(28) + 10, foot: [20, 8], inBath: true });
+  add({ kind: 'capyRest', x: px(24) + 8, y: px(29) + 2, foot: [22, 7] });
+  add({ kind: 'bucket', x: px(35) + 12, y: px(26) + 6, foot: [10, 5] });
+  add({ kind: 'fern', x: px(25) + 2, y: px(26) + 4 });
+  add({ kind: 'fern', x: px(35) + 4, y: px(30) + 4, flip: true });
+  add({ kind: 'reed', x: px(24) + 4, y: px(31) + 4 });
+  add({ kind: 'sign', x: px(27), y: px(24) + 6, foot: [4, 4], label: '카피바라 온천' });
 
   // 광장 주변 나무·덤불
   const trees: [number, number, PropKind][] = [
@@ -304,12 +355,11 @@ function buildMap(): WorldMap {
   const bushes: [number, number][] = [
     [px(27) + 8, px(7)],
     [px(33) - 8, px(7) + 6],
-    [px(18) + 6, px(10)],
+    [px(19) + 6, px(11)],
     [px(42) - 4, px(12) - 6],
-    [px(7) + 4, px(14)],
+    [px(7) + 4, px(15)],
     [px(53), px(16) + 2],
-    [px(24), px(26) + 6],
-    [px(36) + 4, px(26) + 2],
+    [px(36) + 8, px(24) + 2],
     [px(15) + 6, px(31) - 2],
     [px(41) + 6, px(31) - 2],
     [px(3) + 8, px(19) + 4],
@@ -329,29 +379,39 @@ function buildMap(): WorldMap {
 
   // ------------------------------------------------------------ 충돌
   const collision = new CollisionGrid(WORLD_W, WORLD_H);
+  const bathGrid = new CollisionGrid(WORLD_W, WORLD_H);
+  bathGrid.data.fill(1);
   for (let j = 0; j < rows; j++)
     for (let i = 0; i < cols; i++) {
       const t = tiles[j * cols + i];
-      if (t === T.WALL || t === T.WATER) collision.blockRect(px(i), px(j), TILE, TILE);
+      if (t === T.WALL || t === T.WATER || t === T.SPRING) collision.blockRect(px(i), px(j), TILE, TILE);
+      if (t === T.SPRING) bathGrid.clearRect(px(i), px(j), TILE, TILE);
     }
-  // 물가는 조금 여유 있게 걸을 수 있도록 실제 연못 테두리 안쪽 반 칸은 허용하지 않음 (위에서 처리됨)
   collision.blockRect(0, 0, px(2), WORLD_H); // 왼쪽 숲
   collision.blockRect(WORLD_W - px(2), 0, px(2), WORLD_H); // 오른쪽 숲
   collision.blockRect(0, px(32) - 6, WORLD_W, WORLD_H); // 아래쪽 숲
   for (const p of props) {
     if (!p.foot) continue;
     const [w, h] = p.foot;
-    collision.blockRect(p.x - w / 2, p.y - h, w, h);
+    (p.inBath ? bathGrid : collision).blockRect(p.x - w / 2, p.y - h, w, h);
   }
 
-  // ------------------------------------------------------------ 구역
+  // ------------------------------------------------------------ 구역 (앞쪽이 우선)
   const zones: Zone[] = [
     {
       id: 'board',
       name: '메시지 게시판',
-      desc: '선후배에게 한마디를 남기는 게시판이에요. 2차 업데이트에서 열려요.',
-      phase: 2,
-      rect: { x: px(3), y: px(3), w: px(16), h: px(9) },
+      desc: '선후배에게 한마디를 남기고, 다른 사람의 쪽지를 읽어보세요.',
+      phase: 1,
+      rect: { x: px(27), y: px(11), w: px(6), h: px(6) },
+      label: { x: px(30), y: px(11) - 4 },
+    },
+    {
+      id: 'foodtruck',
+      name: '푸드트럭',
+      desc: '축제 간식을 받아 들고 다니다 먹어보세요.',
+      phase: 1,
+      rect: { x: px(2), y: px(3), w: px(17), h: px(10) },
       label: { x: px(11), y: px(2) + 4 },
     },
     {
@@ -379,12 +439,12 @@ function buildMap(): WorldMap {
       label: { x: px(49), y: px(20) + 6 },
     },
     {
-      id: 'pond',
-      name: '작은 연못',
-      desc: '잠시 쉬어가는 물가예요.',
+      id: 'spring',
+      name: '카피바라 온천',
+      desc: '따끈한 온천에 몸을 담그고 카피바라와 함께 쉬어가요.',
       phase: 1,
-      rect: { x: px(24), y: px(25), w: px(13), h: px(7) },
-      label: { x: px(30), y: px(31) + 8 },
+      rect: { x: px(23), y: px(24), w: px(15), h: px(8) },
+      label: { x: px(30), y: px(32) + 2 },
     },
     {
       id: 'plaza',
@@ -392,7 +452,7 @@ function buildMap(): WorldMap {
       desc: '모두가 모이는 아지트의 한가운데예요.',
       phase: 1,
       rect: { x: px(22), y: px(11), w: px(16), h: px(13) },
-      label: { x: px(30), y: px(11) + 6 },
+      label: { x: px(30), y: px(23) - 2 },
     },
   ];
 
@@ -403,7 +463,13 @@ function buildMap(): WorldMap {
     props,
     zones,
     collision,
-    spawn: { x: px(26), y: px(15), w: px(8), h: px(5) },
+    bathGrid,
+    spawn: { x: px(25), y: px(17), w: px(10), h: px(4) },
+    spots: {
+      foodtruck: { x: px(11), y: px(7) + 2, r: INTERACT_RANGE + 18 },
+      board: { x: px(30), y: px(15) + 10, r: INTERACT_RANGE + 6 },
+      spring: { x: px(30), y: px(28) + 8, r: 92 },
+    },
   };
 }
 
@@ -422,6 +488,22 @@ export function zoneAt(x: number, y: number): Zone | null {
   return null;
 }
 
+export function nearSpot(spot: Spot, x: number, y: number) {
+  return Math.hypot(spot.x - x, spot.y - y) <= spot.r;
+}
+
+/** 온천 가장자리(물에서 36px 이내)에 서 있는지 */
+export function nearSpringEdge(x: number, y: number) {
+  if (!nearSpot(WORLD.spots.spring, x, y)) return false;
+  for (let r = 0; r <= 36; r += 4)
+    for (let a = 0; a < 16; a++) {
+      const cx = x + Math.cos((a / 16) * Math.PI * 2) * r;
+      const cy = y - 3 + Math.sin((a / 16) * Math.PI * 2) * r;
+      if (tileAt(Math.floor(cx / TILE), Math.floor(cy / TILE)) === T.SPRING) return true;
+    }
+  return false;
+}
+
 /** 스폰 영역에서 서 있을 수 있는 무작위 위치 */
 export function randomSpawn(rand: () => number = Math.random): { x: number; y: number } {
   const s = WORLD.spawn;
@@ -430,5 +512,5 @@ export function randomSpawn(rand: () => number = Math.random): { x: number; y: n
     const y = Math.round(s.y + rand() * s.h);
     if (WORLD.collision.canStand(x, y)) return { x, y };
   }
-  return { x: px(30), y: px(17) };
+  return { x: px(30), y: px(19) };
 }
