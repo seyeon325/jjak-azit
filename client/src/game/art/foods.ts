@@ -1,7 +1,7 @@
 /**
  * 음식·이펙트 픽셀 아트.
  * 음식은 12×12 스프라이트로, 캐릭터 손에 붙어 다니고 메뉴판 아이콘으로도 쓰입니다.
- * ※ 수뭉이빵은 교체 가능한 임시 디자인입니다 (학교 공식 에셋이 있으면 drawSumung 만 바꾸면 됨).
+ * 수뭉이빵은 상명대 마스코트 수뭉이 얼굴을 픽셀로 단순화한 아이콘입니다 (drawSumung).
  */
 import type { FoodId } from '../../../../shared/protocol';
 import { PixelCanvas } from './pixel';
@@ -9,20 +9,61 @@ import { PixelCanvas } from './pixel';
 const OUT = '#3d3047';
 export const FOOD_SIZE = 12;
 
+/**
+ * 수뭉이 얼굴 간식: 갈색 뿔 2개(ㅅ·ㅁ 모양), 양옆 귀, 둥근 베이지 얼굴, 작은 눈·입, 분홍 볼.
+ * 12×12 안에서 실루엣이 먼저 읽히도록 몸 없이 머리만 그립니다.
+ */
 function drawSumung(pc: PixelCanvas) {
-  const B = '#f6dcae';
-  const BD = '#e2bb82';
-  const ear = (cx: number) => pc.circle(cx, 3, 1.7, B);
-  ear(3);
-  ear(9);
-  pc.ellipse(6, 7, 5, 4.2, (dx, dy) => (dx + dy > 0.6 ? BD : dx + dy < -0.8 ? '#fff0d2' : B));
-  pc.set(3, 3, '#ffb1c2');
-  pc.set(9, 3, '#ffb1c2');
-  pc.set(4, 6, OUT);
-  pc.set(8, 6, OUT);
-  pc.set(3, 8, '#ff9f9a');
-  pc.set(9, 8, '#ff9f9a');
-  pc.set(6, 8, '#8a3a4a');
+  // 얼굴 + 귀 (외곽선 적용 대상)
+  const face = [
+    '............',
+    '............',
+    '............',
+    '............',
+    '...BBBBBB...',
+    '.WBBLBBBBBW.',
+    '.BBBBBBBBBB.',
+    '..BBEBBEBB..',
+    '..BPBMMBPB..',
+    '..BBBBBBBB..',
+    '...DDDDDD...',
+    '............',
+  ];
+  const C: Record<string, string> = {
+    B: '#fcd8b4', // 얼굴
+    L: '#fff0de', // 하이라이트
+    D: '#efc19a', // 아래쪽 그늘
+    W: '#fff6ec', // 귀 안쪽
+    E: OUT, // 눈
+    M: '#e0959a', // 입 (작고 부드럽게)
+    P: '#ffaaa6', // 볼
+  };
+  face.forEach((r, y) => {
+    for (let x = 0; x < r.length; x++) if (C[r[x]]) pc.set(x, y, C[r[x]]);
+  });
+  pc.outline(OUT);
+  // 뿔은 외곽선 뒤에 그려야 가지 사이 틈이 메워지지 않아 또렷함
+  // 왼쪽: ㅅ자 화살표 모양 / 오른쪽: ㅁ자 상자 모양 (수뭉이 뿔)
+  const H = '#a37d64';
+  const HD = '#6e4f3d';
+  for (const [x, y, c] of [
+    [3, 0, H],
+    [2, 1, HD],
+    [3, 1, H],
+    [4, 1, HD],
+    [3, 2, H],
+    [3, 3, HD],
+    [7, 0, H],
+    [8, 0, H],
+    [9, 0, HD],
+    [7, 1, H],
+    [9, 1, HD],
+    [7, 2, HD],
+    [8, 2, HD],
+    [9, 2, HD],
+    [8, 3, HD],
+  ] as [number, number, string][])
+    pc.set(x, y, c);
 }
 
 function drawTakoyaki(pc: PixelCanvas) {
@@ -109,7 +150,8 @@ export function buildFood(id: FoodId): HTMLCanvasElement {
   if (hit) return hit;
   const pc = new PixelCanvas(FOOD_SIZE, FOOD_SIZE);
   DRAW[id](pc);
-  pc.outline(OUT);
+  // 수뭉이빵은 뿔을 또렷하게 하려고 직접 외곽선을 그림
+  if (id !== 'sumung') pc.outline(OUT);
   const c = pc.flush();
   cache.set(id, c);
   return c;
