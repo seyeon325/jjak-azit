@@ -44,8 +44,8 @@ check(got.ok, '푸드트럭 앞에서 아이스크림 받기');
 const ate = await new Promise<{ ok: boolean }>((r) => s.emit('act', { t: 'eat' }, r));
 check(ate.ok, '먹기');
 
-const notes = await new Promise<unknown[]>((r) => s.emit('boardList', r));
-check(Array.isArray(notes), `게시판 목록 읽기 (쪽지 ${notes.length}개)`);
+const list = await new Promise<{ notes: unknown[] }>((r) => s.emit('boardList', r));
+check(Array.isArray(list.notes), `게시판 목록 읽기 (쪽지 ${list.notes.length}개)`);
 
 s.emit('leave');
 await sleep(200);

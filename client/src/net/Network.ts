@@ -2,27 +2,20 @@
  * Socket.IO 연결 래퍼.
  * - 자동 재연결 (Socket.IO 기본 기능)
  * - 세션 토큰 저장 → 새로고침/재연결 시 같은 캐릭터로 복귀
+ * - 기기 키(uid) 저장 → 게시물·댓글 소유권과 운영자 팀 배정이 재접속 후에도 유지
  */
 import { io, type Socket } from 'socket.io-client';
-import type {
-  ActRequest,
-  ActResult,
-  BoardNote,
-  BoardPostResult,
-  ClientToServerEvents,
-  JoinResult,
-  MoveInput,
-  Profile,
-  ServerToClientEvents,
-  SpectateResult,
-} from '../../../shared/protocol';
+import type { ClientToServerEvents, JoinResult, MoveInput, Profile, ServerToClientEvents, SpectateResult } from '../../../shared/protocol';
 
 export type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 // ?slot=2 처럼 붙이면 한 브라우저에서 캐릭터를 여러 개 따로 저장해 테스트할 수 있어요
 const SLOT = new URLSearchParams(location.search).get('slot')?.replace(/[^a-z0-9]/gi, '').slice(0, 8) ?? '';
-const SESSION_KEY = `azit.session.v1${SLOT ? ':' + SLOT : ''}`;
-const PROFILE_KEY = `azit.profile.v1${SLOT ? ':' + SLOT : ''}`;
+const SUFFIX = SLOT ? ':' + SLOT : '';
+const SESSION_KEY = `azit.session.v1${SUFFIX}`;
+const PROFILE_KEY = `azit.profile.v1${SUFFIX}`;
+const UID_KEY = `azit.uid.v1${SUFFIX}`;
+const PREF_KEY = `azit.prefs.v1${SUFFIX}`;
 
 function safeGet<T>(key: string): T | null {
   try {
@@ -41,6 +34,11 @@ function safeSet(key: string, v: unknown) {
   }
 }
 
+export interface Prefs {
+  hideNames: boolean;
+  noPrank: boolean;
+}
+
 export const Storage = {
   get token(): string | null {
     return safeGet<{ token: string }>(SESSION_KEY)?.token ?? null;
@@ -54,7 +52,31 @@ export const Storage = {
   set profile(v: Profile | null) {
     safeSet(PROFILE_KEY, v);
   },
+  /** 이 브라우저의 고유 키 (처음 한 번 생성) */
+  get uid(): string {
+    let u = safeGet<string>(UID_KEY);
+    if (!u) {
+      u =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+      safeSet(UID_KEY, u);
+    }
+    return u;
+  },
+  get prefs(): Prefs {
+    return { hideNames: false, noPrank: false, ...(safeGet<Partial<Prefs>>(PREF_KEY) ?? {}) };
+  },
+  set prefs(v: Prefs) {
+    safeSet(PREF_KEY, v);
+  },
 };
+
+type Ack<E extends keyof ClientToServerEvents> = ClientToServerEvents[E] extends (...a: infer A) => void
+  ? A extends [...unknown[], (res: infer R) => void]
+    ? R
+    : never
+  : never;
 
 export class Network {
   readonly socket: GameSocket;
@@ -87,43 +109,36 @@ export class Network {
     });
   }
 
-  private call<T>(fn: (ack: (r: T) => void) => void, timeoutMs = 6000): Promise<T | { ok: false; reason: string }> {
+  /** ack 가 있는 요청 (시간 초과 시 실패 응답) */
+  req<E extends keyof ClientToServerEvents>(ev: E, ...args: unknown[]): Promise<Ack<E> | { ok: false; reason: string }> {
     return new Promise((resolve) => {
-      const t = setTimeout(() => resolve({ ok: false, reason: '서버 응답이 없어요. 네트워크를 확인해주세요.' }), timeoutMs);
-      fn((r) => {
+      const t = setTimeout(() => resolve({ ok: false, reason: '서버 응답이 없어요. 네트워크를 확인해주세요.' }), 6000);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (this.socket.emit as any)(ev, ...args, (r: Ack<E>) => {
         clearTimeout(t);
         resolve(r);
       });
     });
   }
 
-  join(profile: Profile, pos?: { x: number; y: number }): Promise<JoinResult> {
-    return this.call<JoinResult>((ack) => this.socket.emit('join', { profile, pos }, ack));
+  join(profile: Profile, pos?: { x: number; y: number }) {
+    return this.req('join', { profile, uid: Storage.uid, pos }) as Promise<JoinResult>;
   }
 
-  resume(token: string): Promise<JoinResult> {
-    return this.call<JoinResult>((ack) => this.socket.emit('resume', { token }, ack));
+  resume(token: string) {
+    return this.req('resume', { token, uid: Storage.uid }) as Promise<JoinResult>;
   }
 
-  spectate(): Promise<SpectateResult> {
-    return this.call<SpectateResult>((ack) => this.socket.emit('spectate', ack));
+  spectate() {
+    return this.req('spectate') as Promise<SpectateResult>;
+  }
+
+  act(req: Parameters<ClientToServerEvents['act']>[0]) {
+    return this.req('act', req) as Promise<{ ok: true } | { ok: false; reason: string }>;
   }
 
   sendMove(input: MoveInput) {
     if (this.socket.connected) this.socket.volatile.emit('m', input);
-  }
-
-  act(req: ActRequest): Promise<ActResult> {
-    return this.call<ActResult>((ack) => this.socket.emit('act', req, ack));
-  }
-
-  async boardList(): Promise<BoardNote[]> {
-    const res = await this.call<BoardNote[]>((ack) => this.socket.emit('boardList', ack));
-    return Array.isArray(res) ? res : [];
-  }
-
-  boardPost(text: string, color: number): Promise<BoardPostResult> {
-    return this.call<BoardPostResult>((ack) => this.socket.emit('boardPost', { text, color }, ack));
   }
 
   leave() {

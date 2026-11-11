@@ -4,8 +4,14 @@
  * 화면(Phaser)과 UI(HUD)는 이 저장소만 바라봅니다.
  */
 import { INTERP_DELAY_MS, TICK_HZ } from '../../../shared/constants';
+import type { EmoteId, PoseId } from '../../../shared/social';
 import type {
+  BoardComment,
   BoardNote,
+  ChatMessage,
+  DisplaySettings,
+  FxEvent,
+  RequestEvent,
   Dir,
   FoodId,
   LeaveReason,
@@ -44,6 +50,23 @@ type StoreEvents = {
   eat: [PlayerInfo, FoodId];
   /** 새 게시판 쪽지 */
   note: [BoardNote];
+  noteUpdate: [BoardNote];
+  noteDelete: [number];
+  comment: [BoardComment];
+  commentUpdate: [BoardComment];
+  commentDelete: [number, number];
+  chat: [ChatMessage];
+  emote: [PlayerInfo, EmoteId];
+  pose: [PlayerInfo, PoseId, number];
+  fx: [FxEvent];
+  req: [RequestEvent];
+  info: [string];
+  swing: [string, number];
+  fireQ: [string];
+  notice: [string];
+  display: [DisplaySettings];
+  teamNames: [string[]];
+  muted: [boolean];
 };
 
 const TICK_MS = 1000 / TICK_HZ;
@@ -51,6 +74,10 @@ const TICK_MS = 1000 / TICK_HZ;
 export class WorldStore extends Emitter<StoreEvents> {
   readonly players = new Map<number, PlayerEntry>();
   selfId: number | null = null;
+  display: DisplaySettings = { hideNames: false, hideTeams: false, hideBubbles: false, photo: false };
+  teamNames: string[] = [];
+  swings: Record<string, number> = {};
+  muted = false;
   /** 로컬 시각 - 서버 시각 (지연 포함 추정치) */
   private offset: number | null = null;
 
@@ -89,15 +116,55 @@ export class WorldStore extends Emitter<StoreEvents> {
       if (e) this.emit('eat', e.info, food);
     });
     socket.on('bn', (note) => this.emit('note', note));
+    socket.on('bu', (n) => this.emit('noteUpdate', n));
+    socket.on('bd', (id) => this.emit('noteDelete', id));
+    socket.on('cn', (c) => this.emit('comment', c));
+    socket.on('cu', (c) => this.emit('commentUpdate', c));
+    socket.on('cdel', (noteId, id) => this.emit('commentDelete', noteId, id));
+    socket.on('chat', (m) => this.emit('chat', m));
+    socket.on('emote', (id, kind) => {
+      const e = this.players.get(id);
+      if (e) this.emit('emote', e.info, kind);
+    });
+    socket.on('pose', (id, kind, at) => {
+      const e = this.players.get(id);
+      if (e) this.emit('pose', e.info, kind, at);
+    });
+    socket.on('fx', (ev) => this.emit('fx', ev));
+    socket.on('req', (r) => this.emit('req', r));
+    socket.on('info', (t) => this.emit('info', t));
+    socket.on('swing', (seat, level) => {
+      this.swings[seat] = level;
+      this.emit('swing', seat, level);
+    });
+    socket.on('fireQ', (q) => this.emit('fireQ', q));
+    socket.on('notice', (t) => this.emit('notice', t));
+    socket.on('display', (d) => {
+      this.display = d;
+      this.emit('display', d);
+    });
+    socket.on('teamNames', (n) => {
+      this.teamNames = n;
+      this.emit('teamNames', n);
+    });
+    socket.on('muted', (m) => {
+      this.muted = m;
+      this.emit('muted', m);
+    });
   }
 
   reset(room: RoomSnapshot, selfId: number | null) {
     this.players.clear();
     this.selfId = selfId;
     this.offset = Date.now() - room.serverTime;
+    this.swings = room.swings ?? {};
+    if (room.display) this.display = room.display;
+    if (room.teamNames) this.teamNames = room.teamNames;
     for (const p of room.players) this.add(p, false);
     this.emit('reset');
     this.emit('count', this.onlineCount);
+    this.emit('display', this.display);
+    this.emit('teamNames', this.teamNames);
   }
 
   get self(): PlayerInfo | null {
@@ -172,4 +239,9 @@ export class WorldStore extends Emitter<StoreEvents> {
       moving: b.moving || a.moving,
     };
   }
+}
+
+/** 이름으로 팀 이름 찾기 (운영자가 바꾼 이름 우선) */
+export function teamName(store: WorldStore, team: number): string {
+  return store.teamNames[team] ?? ['레드팀', '블루팀', '그린팀', '옐로팀', '퍼플팀', '핑크팀'][team] ?? '';
 }

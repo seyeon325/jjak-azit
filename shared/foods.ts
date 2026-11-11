@@ -1,5 +1,6 @@
 /** 푸드트럭 메뉴 (클라이언트·서버 공용) */
 import type { FoodId, Grade } from './protocol';
+import { gradeText } from './social';
 
 export type FoodReaction = 'happy' | 'hot' | 'heart' | 'star' | 'yum';
 
@@ -25,6 +26,7 @@ export function foodDef(id: FoodId | null | undefined): FoodDef | null {
   return FOODS.find((f) => f.id === id) ?? null;
 }
 
-export function gradeLabel(g: Grade | number | undefined): string {
-  return g && g >= 1 && g <= 4 ? `${g}학년` : '기타';
+/** 학년 표시 ('기타' 는 직접 입력한 소속이 있으면 그 글자) */
+export function gradeLabel(g: Grade | number | undefined, text?: string | null): string {
+  return gradeText(g, text);
 }

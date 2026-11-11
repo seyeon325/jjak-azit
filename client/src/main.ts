@@ -1,11 +1,13 @@
 /**
  * 앱 진입점
  *  - /        : 참가자 화면 (접속 → 캐릭터 만들기 → 광장)
- *  - /screen  : 운영자 관전 화면 (빔프로젝터용)
+ *  - /screen  : 관전 화면 (빔프로젝터용)
+ *  - /admin   : 운영자 페이지 (로그인 후 관전 화면 + 관리 패널)
  */
 import './styles/fonts.css';
 import './styles/main.css';
 import './styles/features.css';
+import './styles/social.css';
 import type Phaser from 'phaser';
 import type { JoinResult, Profile } from '../../shared/protocol';
 import { gradeLabel } from '../../shared/foods';
@@ -14,6 +16,7 @@ import { InputController } from './game/InputController';
 import type { WorldScene } from './game/scenes/WorldScene';
 import { Network, Storage } from './net/Network';
 import { WorldStore } from './state/WorldStore';
+import { AdminPanel, adminLogin, adminToken, clearAdminToken } from './ui/AdminPanel';
 import { h } from './ui/dom';
 import { Hud } from './ui/Hud';
 import { Joystick } from './ui/Joystick';
@@ -22,7 +25,9 @@ import { ScreenHud } from './ui/ScreenHud';
 import { WorldOverlay } from './ui/WorldOverlay';
 
 const app = document.getElementById('app')!;
-const isScreen = /^\/screen\/?$/.test(location.pathname) || new URLSearchParams(location.search).has('screen');
+const path = location.pathname.replace(/\/+$/, '');
+const isAdmin = path === '/admin';
+const isScreen = path === '/screen' || new URLSearchParams(location.search).has('screen');
 
 async function loadFonts() {
   try {
@@ -41,37 +46,52 @@ function splash(text: string) {
   return el;
 }
 
-async function startGame(mode: 'player' | 'screen', store: WorldStore, net: Network, input?: InputController) {
+interface Hooks {
+  onZone?: Parameters<typeof import('./game/createGame').createGame>[1]['onZoneChange'];
+  hud?: Hud | null;
+  screen?: ScreenHud | null;
+}
+
+async function startGame(mode: 'player' | 'screen', store: WorldStore, net: Network, hooks: Hooks, input?: InputController) {
   const stage = h('div', { class: `stage-root ${mode}` });
   const canvasHost = h('div', { class: 'canvas-host' });
   stage.append(canvasHost);
   app.append(stage);
   const overlay = new WorldOverlay(canvasHost);
   const { createGame } = await import('./game/createGame');
-  let hud: Hud | null = null;
-  const ready = new Promise<void>((resolve) => {
-    const game = createGame(canvasHost, {
+  let ref: { game: Phaser.Game; scene: () => WorldScene | null } | null = null;
+  await new Promise<void>((resolve) => {
+    ref = createGame(canvasHost, {
       mode,
       store,
       net,
       input,
       overlay,
-      onZoneChange: (z) => hud?.setZone(z),
-      onInteract: (st) => hud?.setInteract(st),
-      onBoardTap: () => hud?.openBoardPanel(),
+      onZoneChange: (z) => hooks.hud?.setZone(z),
+      onInteract: (st) => hooks.hud?.setInteract(st),
+      onBoardTap: () => hooks.hud?.openBoardPanel(),
+      onPlayerTap: (id) => hooks.hud?.openPlayer(id),
+      onTrackLost: () => hooks.screen?.trackLost(),
       onReady: () => resolve(),
     });
-    gameRef = game;
   });
-  await ready;
-  return {
-    stage,
-    overlay,
-    setHud: (x: Hud) => (hud = x),
-    scene: () => gameRef?.scene() ?? null,
-  };
+  // 새 쪽지가 올라오면 광장 게시판 위에 잠깐 떠오름
+  store.on('note', (n) => {
+    const b = WORLD.spots.board;
+    const t = Array.from(n.text).slice(0, 22).join('') + (Array.from(n.text).length > 22 ? '…' : '');
+    overlay.pop(b.x, b.y - 64, `${n.anon ? '익명' : n.nickname}: ${t}`);
+  });
+  return { stage, overlay, canvasHost, scene: () => ref?.scene() ?? null };
 }
-let gameRef: { game: Phaser.Game; scene: () => WorldScene | null } | null = null;
+
+async function fetchTeamNames(): Promise<string[] | undefined> {
+  try {
+    const r = (await fetch('/api/info').then((x) => x.json())) as { teamNames?: string[] };
+    return r.teamNames;
+  } catch {
+    return undefined;
+  }
+}
 
 // ------------------------------------------------------------------ 참가자
 
@@ -79,10 +99,12 @@ async function runPlayer() {
   const net = new Network();
   const store = new WorldStore();
   store.bind(net.socket);
+  const hooks: Hooks = {};
 
   const loading = splash('아지트에 연결하는 중…');
   // 캐릭터를 고르는 동안 게임 엔진을 미리 받아둠
   void import('./game/createGame');
+  const teamNamesP = fetchTeamNames();
   await loadFonts();
   const connected = await net.waitConnected(8000);
 
@@ -92,22 +114,25 @@ async function runPlayer() {
 
   const enter = async (res: Extract<JoinResult, { ok: true }>) => {
     Storage.token = res.token;
+    store.muted = res.muted;
     store.reset(res.room, res.selfId);
     if (inGame) return;
     inGame = true;
     const input = new InputController();
-    const g = await startGame('player', store, net, input);
-    hud = new Hud(store, net, {
+    const g = await startGame('player', store, net, hooks, input);
+    hud = new Hud(store, net, g.overlay, {
       onRecreate: () => {
         net.leave();
         Storage.token = null;
         setTimeout(() => location.reload(), 250);
       },
     });
-    g.setHud(hud);
+    hooks.hud = hud;
+    hud.applyDisplay();
+    if (Storage.prefs.noPrank) net.socket.emit('setPref', { noPrank: true });
     g.stage.append(hud.el, new Joystick(input).el);
     const me = store.self;
-    if (me) hud.toast(`어서 와요, ${gradeLabel(me.grade)} ${me.nickname} ${me.role === 'senior' ? '선배' : '후배'}님!`, 'info');
+    if (me) hud.toast(`어서 와요, ${gradeLabel(me.grade, me.gradeText)} ${me.nickname} ${me.role === 'senior' ? '선배' : '후배'}님!`, 'info');
   };
 
   // 저장된 세션이 있으면 바로 복귀 (새로고침 대응)
@@ -124,30 +149,41 @@ async function runPlayer() {
 
   let login: LoginScreen | null = null;
   if (!resumed) {
-    login = new LoginScreen(async (profile: Profile) => {
-      if (!net.connected) {
-        const ok = await net.waitConnected(5000);
-        if (!ok) return '서버에 연결할 수 없어요. 와이파이/데이터 연결을 확인해주세요.';
-      }
-      const res = await net.join(profile);
-      if (!res.ok) return res.reason;
-      Storage.profile = profile;
-      await enter(res);
-      login?.el.classList.add('leaving');
-      setTimeout(() => {
-        login?.destroy();
-        login = null;
-      }, 450);
-      return null;
-    }, Storage.profile);
+    login = new LoginScreen(
+      async (profile: Profile) => {
+        if (!net.connected) {
+          const ok = await net.waitConnected(5000);
+          if (!ok) return '서버에 연결할 수 없어요. 와이파이/데이터 연결을 확인해주세요.';
+        }
+        const res = await net.join(profile);
+        if (!res.ok) return res.reason;
+        Storage.profile = profile;
+        await enter(res);
+        login?.el.classList.add('leaving');
+        setTimeout(() => {
+          login?.destroy();
+          login = null;
+        }, 450);
+        return null;
+      },
+      Storage.profile,
+      await teamNamesP,
+    );
     app.append(login.el);
     if (!connected) login.setMessage('서버 연결이 늦어지고 있어요. 잠시 후 입장 버튼을 눌러주세요.', 'info');
   }
 
+  // 운영자가 팀을 바꾸면 저장된 프로필에도 반영 (다음 입장 때 유지)
+  store.on('patch', (info, patch) => {
+    if (info.id !== store.selfId || patch.team === undefined) return;
+    const p = Storage.profile;
+    if (p) Storage.profile = { ...p, team: patch.team };
+  });
+
   // 재연결 처리
   net.socket.on('disconnect', (reason) => {
     if (!inGame) return;
-    if (reason === 'io server disconnect') return; // 다른 탭이 이어받음 등
+    if (reason === 'io server disconnect') return;
     hud?.setConn('lost');
   });
   net.socket.io.on('reconnect_attempt', () => {
@@ -162,12 +198,12 @@ async function runPlayer() {
     const t = Storage.token;
     if (t) res = await net.resume(t);
     if (!res.ok && Storage.profile) {
-      // 서버가 재시작되었거나 대기 시간이 지남 → 같은 프로필로 다시 입장
       const me = store.self;
       res = await net.join(Storage.profile, me ? { x: me.x, y: me.y } : undefined);
     }
     if (res.ok) {
       Storage.token = res.token;
+      store.muted = res.muted;
       store.reset(res.room, res.selfId);
       hud?.setConn('restored');
     } else hud?.setConn('error', res.reason);
@@ -188,37 +224,73 @@ async function runPlayer() {
   });
 }
 
-// ------------------------------------------------------------------ 관전 화면
+// ------------------------------------------------------------------ 관전 화면 / 운영자
 
-async function runScreen() {
-  document.title = '짝선짝후 아지트 · 관전 화면';
+async function runScreen(admin: boolean) {
+  document.title = admin ? '짝선짝후 아지트 · 운영자' : '짝선짝후 아지트 · 관전 화면';
+  let token: string | null = null;
+  if (admin) {
+    await loadFonts();
+    token = adminToken() ?? (await adminLogin(app));
+  }
   const net = new Network();
   const store = new WorldStore();
   store.bind(net.socket);
-  const loading = splash('관전 화면을 준비하는 중…');
+  const hooks: Hooks = {};
+  const loading = splash(admin ? '운영자 화면을 준비하는 중…' : '관전 화면을 준비하는 중…');
   await loadFonts();
   await net.waitConnected(15000);
+
+  const auth = async () => {
+    if (!admin || !token) return true;
+    const r = await net.req('adminAuth', { token });
+    if (!r.ok) {
+      clearAdminToken();
+      alert(r.reason);
+      location.reload();
+      return false;
+    }
+    return true;
+  };
+  if (!(await auth())) return;
   const first = await net.spectate();
   if (first.ok) store.reset(first.room, null);
   loading.remove();
 
-  const g = await startGame('screen', store, net);
+  const g = await startGame('screen', store, net, hooks);
   g.overlay.addZoneLabels(WORLD.zones);
-  const hud = new ScreenHud(store, (m) => {
-    const s = g.scene();
-    if (s) s.screenCamMode = m;
-  });
+  const hud = new ScreenHud(store, g.scene, g.canvasHost);
+  hooks.screen = hud;
   g.stage.append(hud.el);
+  const applyDisplay = () => {
+    const d = store.display;
+    g.overlay.setHidden({ names: d.hideNames || d.photo, teams: d.hideTeams, bubbles: d.hideBubbles || d.photo });
+  };
+  store.on('display', applyDisplay);
+  applyDisplay();
+  // 관전 화면에서도 일반 채팅은 말풍선으로 (벤치·모닥불 대화는 서버가 보내지 않음)
+  store.on('chat', (m) => g.overlay.bubble(m.from, m.text, 4200, `ch-${m.ch}`));
+
+  if (admin && token) {
+    const panel = new AdminPanel(store, net, token, (id) => hud.track(id), () => {
+      clearAdminToken();
+      location.reload();
+    });
+    g.stage.append(panel.el);
+    g.stage.classList.add('admin');
+    hud.el.querySelector('.qr-card')?.classList.add('hidden'); // 운영자 화면은 QR 기본 숨김 (Q 로 표시)
+  }
 
   net.socket.on('disconnect', () => hud.setConn(false));
   net.socket.on('connect', async () => {
+    if (!(await auth())) return;
     const res = await net.spectate();
     if (res.ok) store.reset(res.room, null);
     hud.setConn(true);
   });
 }
 
-(isScreen ? runScreen() : runPlayer()).catch((err) => {
+(isAdmin ? runScreen(true) : isScreen ? runScreen(false) : runPlayer()).catch((err) => {
   console.error(err);
   app.append(h('div', { class: 'blocker' }, h('div', { class: 'blocker-card' }, h('h2', {}, '문제가 생겼어요'), h('p', {}, '페이지를 새로고침해주세요.'))));
 });

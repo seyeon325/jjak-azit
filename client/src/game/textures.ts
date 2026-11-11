@@ -5,6 +5,8 @@ import { WORLD, type PropKind } from '../../../shared/map';
 import { buildCharacterSheet, characterKey, DIR_ROWS, FRAME_H, FRAME_W, SHEET_COLS } from './art/characters';
 import { buildCrumb, buildFood, buildHeart, buildRippleSheet, buildStar, buildSteam, buildSweat } from './art/foods';
 import { bakeGround } from './art/ground';
+import { buildBalloon, buildDrop, buildEmote, buildHammer, buildImpact, buildPlane, buildTeamBadge, buildTeamRing } from './art/social';
+import { EMOTES, TEAMS } from '../../../shared/social';
 import {
   buildDot,
   buildFlameSheet,
@@ -56,6 +58,16 @@ export function registerStaticTextures(scene: Phaser.Scene) {
   t.addCanvas('steam', buildSteam(12));
   t.addCanvas('crumb', buildCrumb());
   for (const id of FOOD_IDS) t.addCanvas(`food-${id}`, buildFood(id));
+  for (const e of EMOTES) t.addCanvas(`emote-${e}`, buildEmote(e));
+  for (const tm of TEAMS) {
+    t.addCanvas(`ring-${tm.id}`, buildTeamRing(tm.color));
+    t.addCanvas(`team-${tm.id}`, buildTeamBadge(tm.id));
+  }
+  t.addCanvas('plane', buildPlane());
+  t.addCanvas('balloon', buildBalloon());
+  t.addCanvas('drop', buildDrop());
+  t.addCanvas('hammer', buildHammer());
+  t.addCanvas('impact', buildImpact());
 
   const anims = scene.anims;
   anims.create({ key: 'flame', frames: anims.generateFrameNumbers('flame', { start: 0, end: 3 }), frameRate: 9, repeat: -1 });
@@ -91,6 +103,19 @@ export function ensureCharacter(scene: Phaser.Scene, look: number): string {
   const tex = scene.textures.addCanvas(key, buildCharacterSheet(look))!;
   DIR_ROWS.forEach((dir, row) => {
     for (let c = 0; c < SHEET_COLS; c++) tex.add(`${dir}${c}`, 0, c * FRAME_W, row * FRAME_H, FRAME_W, FRAME_H);
+  });
+  // 손 흔들기 / 춤
+  scene.anims.create({ key: `${key}-wave`, frames: [{ key, frame: 'p1' }, { key, frame: 'p2' }], frameRate: 6, repeat: -1 });
+  scene.anims.create({
+    key: `${key}-dance`,
+    frames: [
+      { key, frame: 'p1' },
+      { key, frame: 'd2' },
+      { key, frame: 'p4' },
+      { key, frame: 'd4' },
+    ],
+    frameRate: 5,
+    repeat: -1,
   });
   for (const dir of ['d', 'u', 's'] as const) {
     scene.anims.create({

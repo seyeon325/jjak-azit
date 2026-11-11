@@ -11,6 +11,14 @@ import { openBoard } from './BoardPanel';
 import { CharacterPreview } from './CharacterPreview';
 import { h, icon, ICON, logoMark, roleLabel } from './dom';
 import { openFoodMenu } from './FoodMenu';
+import { ChatBar } from './ChatBar';
+import { openEmoteMenu, openPlayerMenu, showRequest } from './SocialMenu';
+import type { WorldOverlay } from './WorldOverlay';
+import { Storage } from '../net/Network';
+import { CAMPFIRE_R } from '../../../shared/constants';
+import { WORLD as MAP } from '../../../shared/map';
+import { TEAMS, teamSvg, type InteractionId } from '../../../shared/social';
+import { teamName } from '../state/WorldStore';
 import type { Sheet } from './Sheet';
 
 /** 받침에 따라 을/를 */
@@ -39,10 +47,18 @@ export class Hud {
 
   private actionBar: ActionBar;
   private panel: Sheet | null = null;
+  readonly chat: ChatBar;
+  private fireCard: HTMLElement;
+  private statusChip: HTMLElement;
+  private noticeEl: HTMLElement;
+  private last: InteractState | null = null;
+  private wasInFire = false;
+  private prefs = Storage.prefs;
 
   constructor(
     private store: WorldStore,
     private net: Network,
+    private overlay: WorldOverlay,
     private actions: { onRecreate: () => void },
   ) {
     this.count = h('span', { class: 'count-num' }, String(store.onlineCount));
@@ -55,7 +71,21 @@ export class Hud {
       onEat: () => this.act({ t: 'eat' }),
       onBath: (on) => this.act({ t: 'bath', on }),
       onBoard: () => this.openBoardPanel(),
+      onSit: (seat) => this.act({ t: 'sit', seat }),
+      onStand: () => this.act({ t: 'stand' }),
+      onSlide: () => this.act({ t: 'slide' }),
+      onPush: (seat) => this.act({ t: 'push', seat }),
+      onPlayer: (id) => this.openPlayer(id),
+      onFireChat: () => this.chat.open('fire'),
+      onUnfollow: () => this.net.socket.emit('unfollow'),
     });
+    this.chat = new ChatBar(store, net, (open) => {
+      document.body.classList.toggle('typing', open);
+      this.actionBar.suspend(open || !!this.panel?.isOpen);
+    });
+    this.fireCard = h('div', { class: 'fire-card hidden' });
+    this.statusChip = h('div', { class: 'status-chip hidden' });
+    this.noticeEl = h('div', { class: 'notice hidden', role: 'alert' });
 
     const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 
@@ -79,10 +109,21 @@ export class Hud {
           h('button', { class: 'icon-btn', type: 'button', 'aria-label': '메뉴', onclick: () => this.openMenu('guide') }, icon('menu')),
         ),
       ),
+      h(
+        'div',
+        { class: 'quickbar' },
+        h('button', { class: 'icon-btn quick chat', type: 'button', 'aria-label': '채팅', onclick: () => this.chat.open() }, h('span', { class: 'qi' }, '말'), h('small', {}, '채팅')),
+        h('button', { class: 'icon-btn quick emo', type: 'button', 'aria-label': '표정·동작', onclick: () => this.openEmotes() }, h('span', { class: 'qi' }, '^^'), h('small', {}, '표정')),
+      ),
+      this.chat.mini,
+      this.fireCard,
+      this.statusChip,
+      this.noticeEl,
       this.conn,
       this.zoneCard,
       this.toasts,
       this.actionBar.el,
+      this.chat.el,
       !isTouch ? h('div', { class: 'key-hint' }, h('kbd', {}, 'W A S D'), ' 또는 ', h('kbd', {}, '방향키'), '로 이동') : null,
     );
 
@@ -106,6 +147,19 @@ export class Hud {
       }),
       store.on('note', (n) => {
         if (n.nickname !== store.self?.nickname) this.toast(`${n.nickname} 님이 게시판에 쪽지를 남겼어요`, 'info');
+      }),
+      store.on('chat', (m) => this.overlay.bubble(m.from, m.text, 4200, `ch-${m.ch}`)),
+      store.on('req', (r) =>
+        showRequest(this.el, r, (accept) => this.net.socket.emit('respond', { reqId: r.reqId, accept })),
+      ),
+      store.on('info', (t) => this.toast(t, 'info')),
+      store.on('notice', (t) => this.showNotice(t)),
+      store.on('muted', (m) => this.toast(m ? '운영자가 채팅을 잠시 제한했어요.' : '채팅 제한이 풀렸어요.', 'info')),
+      store.on('fireQ', (q) => this.renderFire(q)),
+      store.on('display', () => this.applyDisplay()),
+      store.on('reset', () => {
+        this.applyDisplay();
+        if (this.prefs.noPrank) this.net.socket.emit('setPref', { noPrank: true });
       }),
     );
   }
@@ -135,7 +189,117 @@ export class Hud {
   // -------------------------------------------------------------- 상호작용
 
   setInteract(s: InteractState) {
+    this.last = s;
     this.actionBar.update(s);
+    // 채팅 채널
+    const partner = this.benchPartner();
+    this.chat.setState({ fire: s.inFire, fireCount: this.fireCount(), bench: partner });
+    // 모닥불 카드
+    if (s.inFire && !this.wasInFire) {
+      this.net.req('fireQuestion', { next: false }).then((r) => 'question' in r && this.renderFire(r.question));
+      this.toast('모닥불 대화에 참여했어요. 채팅이 모닥불 주변 사람에게만 전달돼요.', 'info');
+    }
+    if (!s.inFire) this.fireCard.classList.add('hidden');
+    this.wasInFire = s.inFire;
+    // 상태 칩 (벤치 대화 / 따라가기)
+    const me = this.store.self;
+    const followers = [...this.store.players.values()].filter((e) => e.info.followId === this.store.selfId).map((e) => e.info.nickname);
+    let chip: Node[] | null = null;
+    if (s.seated?.kind === 'bench') chip = [h('span', {}, partner ? `${partner} 님과 벤치 대화 중 (둘만 보여요)` : '벤치에 앉았어요 · 옆자리를 기다리는 중')];
+    else if (me?.followId != null) {
+      const t = this.store.players.get(me.followId)?.info.nickname ?? '';
+      chip = [h('span', {}, `${t} 님을 따라가는 중`), h('button', { type: 'button', onclick: () => this.net.socket.emit('unfollow') }, '그만')];
+    } else if (followers.length) chip = [h('span', {}, `${followers.join(', ')} 님이 따라오는 중`), h('button', { type: 'button', onclick: () => this.net.socket.emit('unfollow') }, '그만')];
+    this.statusChip.classList.toggle('hidden', !chip);
+    if (chip) this.statusChip.replaceChildren(...chip);
+  }
+
+  private fireCount() {
+    const c = MAP.spots.campfire;
+    let n = 0;
+    for (const e of this.store.players.values()) if (e.info.status === 'online' && Math.hypot(e.info.x - c.x, e.info.y - c.y) <= CAMPFIRE_R) n++;
+    return n;
+  }
+
+  private benchPartner(): string | null {
+    const me = this.store.self;
+    if (!me?.seat?.startsWith('bench')) return null;
+    const group = me.seat.split('-')[0];
+    for (const e of this.store.players.values()) if (e.info.id !== me.id && e.info.seat?.startsWith(group + '-')) return e.info.nickname;
+    return null;
+  }
+
+  private renderFire(q: string) {
+    if (!this.last?.inFire) return;
+    this.fireCard.classList.remove('hidden');
+    this.fireCard.replaceChildren(
+      h('div', { class: 'fire-head' }, h('b', {}, '모닥불 대화 참여 중'), h('span', {}, `${this.fireCount()}명`)),
+      h('p', { class: 'fire-q' }, q),
+      h(
+        'div',
+        { class: 'fire-btns' },
+        h(
+          'button',
+          {
+            type: 'button',
+            onclick: async () => {
+              const r = await this.net.req('fireQuestion', { next: true });
+              if ('question' in r) this.renderFire(r.question);
+            },
+          },
+          '다른 질문',
+        ),
+        h('button', { type: 'button', class: 'on', onclick: () => this.chat.open('fire') }, '대화하기'),
+      ),
+    );
+  }
+
+  private showNotice(t: string) {
+    this.noticeEl.replaceChildren(h('b', {}, '운영자 공지'), h('span', {}, t));
+    this.noticeEl.classList.remove('hidden');
+    clearTimeout(this.noticeTimer);
+    this.noticeTimer = window.setTimeout(() => this.noticeEl.classList.add('hidden'), 8000);
+    this.toast(`공지: ${t}`, 'info');
+  }
+  private noticeTimer = 0;
+
+  applyDisplay() {
+    const d = this.store.display;
+    this.overlay.setHidden({ names: d.hideNames || d.photo || this.prefs.hideNames, teams: d.hideTeams, bubbles: d.hideBubbles || d.photo });
+  }
+
+  private openEmotes() {
+    if (this.panel?.isOpen) return;
+    this.actionBar.suspend(true);
+    this.panel = openEmoteMenu(
+      this.el,
+      (e) => this.net.socket.emit('emote', e),
+      (p) => this.net.socket.emit('pose', p),
+      () => this.actionBar.suspend(false),
+    );
+  }
+
+  /** 다른 참가자 상호작용 메뉴 */
+  openPlayer(id: number) {
+    const t = this.store.players.get(id)?.info;
+    const me = this.store.self;
+    if (!t || !me || id === me.id) return;
+    const d = Math.hypot(t.x - me.x, t.y - me.y);
+    if (d > 160) return this.toast(`${t.nickname} 님에게 조금 더 가까이 가주세요.`, 'info');
+    if (this.panel?.isOpen) return;
+    this.actionBar.suspend(true);
+    this.panel = openPlayerMenu(
+      this.el,
+      t,
+      d,
+      async (k: InteractionId) => {
+        const r = await this.net.req('interact', { kind: k, target: id });
+        if (!r.ok) return r.reason;
+        if (k === 'dance' || k === 'follow') this.toast(`${t.nickname} 님에게 요청을 보냈어요.`, 'info');
+        return null;
+      },
+      () => this.actionBar.suspend(false),
+    );
   }
 
   private async act(req: Parameters<Network['act']>[0]) {
@@ -288,7 +452,8 @@ export class Hud {
         { class: 'muted' },
         isTouch ? '화면 왼쪽 아래를 엄지로 누른 채 원하는 방향으로 밀어보세요.' : 'W A S D 또는 방향키로 이동해요. 휴대폰에서는 화면 왼쪽 아래 조이스틱을 쓰면 돼요.',
       ),
-      h('p', { class: 'muted' }, '푸드트럭·온천·게시판 가까이 가면 오른쪽 아래에 버튼이 나타나요.' + (isTouch ? '' : ' (E 키로도 누를 수 있어요)')),
+      h('p', { class: 'muted' }, '푸드트럭·온천·게시판·벤치·놀이기구·다른 참가자 가까이 가면 오른쪽 아래에 버튼이 나타나요.' + (isTouch ? '' : ' (E 키로도 누를 수 있어요)')),
+      h('p', { class: 'muted' }, '오른쪽 위 ‘채팅’으로 대화하고, ‘표정’으로 이모티콘·동작을 보여줄 수 있어요. 다른 캐릭터를 눌러도 상호작용 메뉴가 열려요.'),
       h('h3', {}, '아지트 둘러보기'),
       h(
         'ul',
@@ -307,7 +472,7 @@ export class Hud {
         'ol',
         { class: 'roadmap' },
         h('li', { class: 'done' }, h('b', {}, '1차'), ' 아지트 공간 · 캐릭터 · 실시간 이동 · 게시판 · 푸드트럭 · 온천'),
-        h('li', {}, h('b', {}, '2차'), ' 대화 · 놀이터 장난 기믹 · 포즈와 춤'),
+        h('li', { class: 'done' }, h('b', {}, '2차'), ' 채팅 · 모닥불·벤치 대화 · 이모티콘·포즈 · 장난 기믹 · 놀이터'),
         h('li', {}, h('b', {}, '3차'), " '과제 괴물' 협동 레이드"),
       ),
     );
@@ -341,6 +506,12 @@ export class Hud {
       h('h3', {}, h('span', { class: 'role-dot junior' }), `후배 ${jun.length}`),
       jun.length ? h('ul', { class: 'people-list' }, ...jun.map(row)) : h('p', { class: 'muted' }, '아직 후배가 없어요'),
     );
+  }
+
+  private toggle(label: string, value: boolean, onChange: (v: boolean) => void) {
+    const input = h('input', { type: 'checkbox', onchange: () => onChange(input.checked) });
+    input.checked = value;
+    return h('label', { class: 'toggle' }, input, h('span', {}, label));
   }
 
   private meView() {
@@ -379,6 +550,23 @@ export class Hud {
         },
         '캐릭터 다시 만들기',
       ),
+      h(
+        'div',
+        { class: 'settings' },
+        this.toggle('이름표 숨기기 (내 화면만)', this.prefs.hideNames, (v) => {
+          this.prefs = { ...this.prefs, hideNames: v };
+          Storage.prefs = this.prefs;
+          this.applyDisplay();
+        }),
+        this.toggle('장난 받지 않기 (물풍선·뿅망치·그네 밀기 등)', this.prefs.noPrank, (v) => {
+          this.prefs = { ...this.prefs, noPrank: v };
+          Storage.prefs = this.prefs;
+          this.net.socket.emit('setPref', { noPrank: v });
+        }),
+      ),
+      TEAMS[me.team]
+        ? h('p', { class: 'team-line', style: `--tc:${TEAMS[me.team].color}` }, h('i', { html: teamSvg(TEAMS[me.team].symbol, '#fff') }), `${teamName(this.store, me.team)} · 팀은 운영자가 바꿀 수 있어요`)
+        : h('p', { class: 'muted small' }, '아직 팀이 없어요. 운영자가 배정해줄 거예요.'),
       h('p', { class: 'muted small' }, '새로고침하거나 잠깐 연결이 끊겨도 같은 캐릭터로 돌아올 수 있어요.'),
     );
   }

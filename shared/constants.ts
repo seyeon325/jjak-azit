@@ -35,4 +35,18 @@ export const EAT_MS = 2200;
 /** 상호작용 버튼이 나타나는 거리 (px) */
 export const INTERACT_RANGE = 40;
 /** 게시판 쪽지 최대 글자 수 */
-export const NOTE_MAX = 60;
+export const NOTE_MAX = 100;
+/** 댓글 최대 글자 수 */
+export const COMMENT_MAX = 60;
+/** 채팅 최대 글자 수 */
+export const CHAT_MAX = 80;
+/** 학년 '기타' 직접 입력 최대 글자 수 */
+export const GRADE_TEXT_MAX = 6;
+/** 모닥불 대화 반경 (px) */
+export const CAMPFIRE_R = 72;
+/** 좌석·놀이기구에 앉을 수 있는 거리 (px) */
+export const SEAT_RANGE = 30;
+/** 미끄럼틀 타는 시간 */
+export const SLIDE_MS = 1700;
+/** 그네를 이만큼 밀면 '퐁!' */
+export const SWING_LAUNCH = 5;

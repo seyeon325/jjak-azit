@@ -1,13 +1,62 @@
-import { EAT_MS } from '../../shared/constants';
-import { nearSpot, nearSpringEdge, randomSpawn, WORLD } from '../../shared/map';
-import type { ActRequest, ActResult } from '../../shared/protocol';
+import { CAMPFIRE_R, EAT_MS, SEAT_RANGE, SLIDE_MS, SWING_LAUNCH } from '../../shared/constants';
+import { nearSpot, nearSpringEdge, randomSpawn, WORLD, type Seat } from '../../shared/map';
+import type {
+  ActRequest,
+  ActResult,
+  ChatChannel,
+  ChatMessage,
+  DisplaySettings,
+  PlayerInfo,
+  RoomSnapshot,
+  ServerToClientEvents,
+} from '../../shared/protocol';
+import {
+  EMOTES,
+  FIRE_QUESTIONS,
+  INTERACTION_DEF,
+  INTERACTIONS,
+  POSES,
+  type EmoteId,
+  type InteractionId,
+  type PoseId,
+} from '../../shared/social';
 import { Room, type IO } from './Room';
 
+export interface PlazaHooks {
+  /** 특정 참가자의 소켓에만 보내기 */
+  emitTo<E extends keyof ServerToClientEvents>(playerId: number, ev: E, ...args: Parameters<ServerToClientEvents[E]>): void;
+  isMuted(playerId: number): boolean;
+  display(): DisplaySettings;
+  teamNames(): string[];
+}
+
+interface Req {
+  id: number;
+  kind: 'dance' | 'follow';
+  from: number;
+  to: number;
+  timer: NodeJS.Timeout;
+}
+
+const SEAT_BY_ID = new Map(WORLD.seats.map((s) => [s.id, s]));
+
 /**
- * 메인 광장. 공용 맵 데이터로 벽·장애물 충돌을 검사하고
- * 푸드트럭(음식 받기·먹기)과 카피바라 온천(들어가기·나가기)을 처리합니다.
+ * 메인 광장. 공용 맵 데이터로 충돌을 검사하고, 푸드트럭·온천·좌석·놀이기구,
+ * 채팅(일반/모닥불/벤치), 이모티콘·포즈, 플레이어 상호작용을 서버에서 판정합니다.
  */
 export class PlazaRoom extends Room {
+  /** 좌석 id → 앉은 참가자 */
+  private seats = new Map<string, number>();
+  private swingLevel = new Map<string, number>();
+  private swingTimers = new Map<string, NodeJS.Timeout>();
+  private sliding = new Map<number, NodeJS.Timeout>();
+  private cooldown = new Map<string, number>();
+  private reqs = new Map<number, Req>();
+  private nextReq = 1;
+  private fireQ = FIRE_QUESTIONS[0];
+  private fireQAt = 0;
+  hooks!: PlazaHooks;
+
   constructor(io: IO) {
     super('plaza', io);
   }
@@ -24,49 +73,332 @@ export class PlazaRoom extends Room {
     return (bath ? WORLD.bathGrid : WORLD.collision).canStand(x, y);
   }
 
+  protected override locked(id: number) {
+    return this.sliding.has(id);
+  }
+
+  protected override extraSnapshot(): Omit<RoomSnapshot, 'roomId' | 'serverTime' | 'players'> {
+    return { swings: Object.fromEntries(this.swingLevel), display: this.hooks.display(), teamNames: this.hooks.teamNames() };
+  }
+
+  /** 퇴장·연결 끊김 시 좌석·따라가기·요청 정리 */
+  releaseAll(id: number) {
+    const p = this.get(id);
+    if (!p) return;
+    if (p.seat) this.leaveSeat(id, false);
+    const sl = this.sliding.get(id);
+    if (sl) {
+      clearTimeout(sl);
+      this.sliding.delete(id);
+      const e = WORLD.slide.exit;
+      this.patch(id, { x: e.x, y: e.y });
+    }
+    if (p.followId !== null) this.patch(id, { followId: null });
+    for (const other of this.all()) if (other.followId === id) this.patch(other.id, { followId: null });
+    for (const r of [...this.reqs.values()]) if (r.from === id || r.to === id) this.dropReq(r.id);
+  }
+
+  override removePlayer(id: number, reason: 'left' | 'timeout') {
+    this.releaseAll(id);
+    super.removePlayer(id, reason);
+  }
+
+  private cool(id: number, key: string, ms: number): boolean {
+    const k = `${id}:${key}`;
+    const now = Date.now();
+    if ((this.cooldown.get(k) ?? 0) > now) return false;
+    this.cooldown.set(k, now + ms);
+    return true;
+  }
+
+  // ---------------------------------------------------------------- 상호작용 요청 (음식·온천·좌석·놀이기구)
+
   act(id: number, req: ActRequest): ActResult {
-    const rec = this.players.get(id);
-    if (!rec) return { ok: false, reason: '아지트에 입장한 뒤 이용할 수 있어요.' };
-    const p = rec.info;
+    const p = this.get(id);
+    if (!p) return { ok: false, reason: '아지트에 입장한 뒤 이용할 수 있어요.' };
+    const busy = () => (p.seat ? '먼저 일어나 주세요.' : this.sliding.has(id) ? '미끄럼틀을 타는 중이에요.' : null);
 
-    if (req.t === 'food') {
-      if (p.bath) return { ok: false, reason: '온천에서 나온 뒤 주문해주세요.' };
-      if (p.eating) return { ok: false, reason: '지금 먹는 중이에요.' };
-      if (p.food) return { ok: false, reason: '한 번에 하나만 들 수 있어요. 먼저 먹어주세요!' };
-      if (!nearSpot(WORLD.spots.foodtruck, p.x, p.y)) return { ok: false, reason: '푸드트럭 가까이에서 주문할 수 있어요.' };
-      this.patch(id, { food: req.food });
+    switch (req.t) {
+      case 'food': {
+        if (p.bath) return { ok: false, reason: '온천에서 나온 뒤 주문해주세요.' };
+        if (p.eating) return { ok: false, reason: '지금 먹는 중이에요.' };
+        if (p.food) return { ok: false, reason: '한 번에 하나만 들 수 있어요. 먼저 먹어주세요!' };
+        if (!nearSpot(WORLD.spots.foodtruck, p.x, p.y)) return { ok: false, reason: '푸드트럭 가까이에서 주문할 수 있어요.' };
+        this.patch(id, { food: req.food });
+        return { ok: true };
+      }
+      case 'eat': {
+        if (!p.food) return { ok: false, reason: '들고 있는 음식이 없어요.' };
+        if (p.eating) return { ok: true };
+        if (p.bath) return { ok: false, reason: '온천에서는 먹을 수 없어요.' };
+        const food = p.food;
+        this.patch(id, { eating: true });
+        this.io.to(this.channel).emit('pe', id, food);
+        const rec = this.players.get(id)!;
+        const t = setTimeout(() => {
+          rec.timers = rec.timers.filter((x) => x !== t);
+          if (this.players.get(id) === rec) this.patch(id, { food: null, eating: false });
+        }, EAT_MS);
+        rec.timers.push(t);
+        return { ok: true };
+      }
+      case 'bath': {
+        if (req.on) {
+          if (p.bath) return { ok: true };
+          const b = busy();
+          if (b) return { ok: false, reason: b };
+          if (p.eating) return { ok: false, reason: '다 먹고 들어가요!' };
+          if (!nearSpringEdge(p.x, p.y)) return { ok: false, reason: '온천 가까이에서 들어갈 수 있어요.' };
+          const spot = WORLD.bathGrid.nearest(p.x, p.y + 26, 64) ?? WORLD.bathGrid.nearest(p.x, p.y + 6, 64);
+          if (!spot) return { ok: false, reason: '온천이 꽉 찼어요. 다른 쪽으로 가볼까요?' };
+          this.patch(id, { bath: true, x: spot.x, y: spot.y, followId: null });
+          return { ok: true };
+        }
+        if (!p.bath) return { ok: true };
+        const land = WORLD.collision.nearest(p.x, p.y, 96) ?? randomSpawn();
+        this.patch(id, { bath: false, x: land.x, y: land.y });
+        return { ok: true };
+      }
+      case 'sit': {
+        const seat = SEAT_BY_ID.get(req.seat);
+        if (!seat) return { ok: false, reason: '앉을 수 없는 곳이에요.' };
+        const b = busy();
+        if (b) return { ok: false, reason: b };
+        if (p.bath) return { ok: false, reason: '온천에서 나온 뒤 앉을 수 있어요.' };
+        if (p.eating) return { ok: false, reason: '다 먹고 앉아요!' };
+        if (Math.hypot(p.x - seat.x, p.y - seat.y) > SEAT_RANGE + 10) return { ok: false, reason: '조금 더 가까이 가주세요.' };
+        if (this.seats.has(seat.id)) return { ok: false, reason: '누가 이미 앉아 있어요.' };
+        this.seats.set(seat.id, id);
+        this.patch(id, { seat: seat.id, x: seat.x, y: seat.y, followId: null });
+        if (seat.kind === 'swing') this.setSwing(seat.id, 0);
+        return { ok: true };
+      }
+      case 'stand': {
+        if (!p.seat) return { ok: true };
+        this.leaveSeat(id, true);
+        return { ok: true };
+      }
+      case 'slide': {
+        const b = busy();
+        if (b) return { ok: false, reason: b };
+        if (p.bath || p.eating) return { ok: false, reason: '지금은 탈 수 없어요.' };
+        const sl = WORLD.slide;
+        if (Math.hypot(p.x - sl.enter.x, p.y - sl.enter.y) > SEAT_RANGE + 6) return { ok: false, reason: '미끄럼틀 계단 앞으로 가주세요.' };
+        const at = Date.now();
+        this.patch(id, { followId: null, x: sl.enter.x, y: sl.enter.y });
+        this.io.to(this.channel).emit('fx', { kind: 'slide', from: id, at });
+        this.sliding.set(
+          id,
+          setTimeout(() => {
+            this.sliding.delete(id);
+            if (this.has(id)) this.patch(id, { x: sl.exit.x, y: sl.exit.y });
+          }, SLIDE_MS),
+        );
+        return { ok: true };
+      }
+      case 'push': {
+        const seat = SEAT_BY_ID.get(req.seat);
+        if (!seat || seat.kind !== 'swing') return { ok: false, reason: '그네가 아니에요.' };
+        const riderId = this.seats.get(seat.id);
+        if (riderId === undefined || riderId === id) return { ok: false, reason: '밀어줄 사람이 없어요.' };
+        const rider = this.get(riderId)!;
+        if (rider.noPrank) return { ok: false, reason: `${rider.nickname} 님은 밀기를 허용하지 않았어요.` };
+        if (p.seat || p.bath) return { ok: false, reason: '지금은 밀 수 없어요.' };
+        if (Math.hypot(p.x - seat.x, p.y - seat.y) > 46) return { ok: false, reason: '그네 가까이 가주세요.' };
+        if (!this.cool(id, 'push', 650)) return { ok: false, reason: '천천히 밀어주세요!' };
+        const level = (this.swingLevel.get(seat.id) ?? 0) + 1;
+        this.io.to(this.channel).emit('pose', id, 'wave', Date.now());
+        if (level >= SWING_LAUNCH) {
+          // 퐁! — 탑승자가 튀어나와 엉덩방아
+          this.seats.delete(seat.id);
+          const land =
+            WORLD.collision.nearest(seat.x + (Math.random() * 24 - 12), seat.y + 44, 40) ??
+            WORLD.collision.nearest(seat.x, seat.y + 20, 80) ??
+            randomSpawn();
+          this.patch(riderId, { seat: null, x: land.x, y: land.y });
+          this.io.to(this.channel).emit('fx', { kind: 'launch', from: id, to: riderId, x: seat.x, y: seat.y, at: Date.now() });
+          this.setSwing(seat.id, 0);
+        } else this.setSwing(seat.id, level);
+        return { ok: true };
+      }
+    }
+  }
+
+  private setSwing(seatId: string, level: number) {
+    this.swingLevel.set(seatId, level);
+    this.io.to(this.channel).emit('swing', seatId, level);
+    clearTimeout(this.swingTimers.get(seatId));
+    if (level > 0)
+      this.swingTimers.set(
+        seatId,
+        setTimeout(() => this.setSwing(seatId, Math.max(0, (this.swingLevel.get(seatId) ?? 1) - 1)), 2600),
+      );
+  }
+
+  private leaveSeat(id: number, broadcast: boolean) {
+    const p = this.get(id);
+    if (!p?.seat) return;
+    const seat = SEAT_BY_ID.get(p.seat);
+    this.seats.delete(p.seat);
+    if (seat?.kind === 'swing') this.setSwing(seat.id, 0);
+    const land = seat ? WORLD.collision.nearest(seat.x, seat.y + 12, 80) ?? randomSpawn() : { x: p.x, y: p.y };
+    if (broadcast || true) this.patch(id, { seat: null, x: land.x, y: land.y });
+  }
+
+  seatOf(id: number): Seat | null {
+    const s = this.get(id)?.seat;
+    return s ? SEAT_BY_ID.get(s) ?? null : null;
+  }
+
+  benchPartner(id: number): number | null {
+    const seat = this.seatOf(id);
+    if (!seat || seat.kind !== 'bench') return null;
+    for (const s of WORLD.seats) {
+      if (s.group !== seat.group || s.id === seat.id) continue;
+      const other = this.seats.get(s.id);
+      if (other !== undefined) return other;
+    }
+    return null;
+  }
+
+  inCampfire(p: PlayerInfo) {
+    const c = WORLD.spots.campfire;
+    return Math.hypot(p.x - c.x, p.y - c.y) <= CAMPFIRE_R;
+  }
+
+  // ---------------------------------------------------------------- 채팅
+
+  private chatWindow = new Map<number, number[]>();
+
+  chat(id: number, ch: ChatChannel, text: string): ActResult {
+    const p = this.get(id);
+    if (!p) return { ok: false, reason: '아지트에 입장한 뒤 이용할 수 있어요.' };
+    if (this.hooks.isMuted(id)) return { ok: false, reason: '운영자가 채팅을 잠시 제한했어요.' };
+    const now = Date.now();
+    const recent = (this.chatWindow.get(id) ?? []).filter((t) => now - t < 10_000);
+    if (recent.length && now - recent[recent.length - 1] < 600) return { ok: false, reason: '조금 천천히 보내주세요.' };
+    if (recent.length >= 8) return { ok: false, reason: '메시지를 너무 많이 보냈어요. 잠시 뒤에 다시 해주세요.' };
+    recent.push(now);
+    this.chatWindow.set(id, recent);
+    const msg: ChatMessage = { ch, from: id, nickname: p.nickname, text, at: now };
+
+    if (ch === 'all') {
+      this.io.to(this.channel).emit('chat', msg);
       return { ok: true };
     }
-
-    if (req.t === 'eat') {
-      if (!p.food) return { ok: false, reason: '들고 있는 음식이 없어요.' };
-      if (p.eating) return { ok: true };
-      if (p.bath) return { ok: false, reason: '온천에서는 먹을 수 없어요.' };
-      const food = p.food;
-      this.patch(id, { eating: true });
-      this.io.to(this.channel).emit('pe', id, food);
-      const t = setTimeout(() => {
-        rec.timers = rec.timers.filter((x) => x !== t);
-        if (this.players.get(id) === rec) this.patch(id, { food: null, eating: false });
-      }, EAT_MS);
-      rec.timers.push(t);
+    if (ch === 'fire') {
+      if (!this.inCampfire(p)) return { ok: false, reason: '모닥불 가까이에서만 모닥불 대화를 할 수 있어요.' };
+      for (const o of this.all()) if (o.status === 'online' && this.inCampfire(o)) this.hooks.emitTo(o.id, 'chat', msg);
       return { ok: true };
     }
-
-    // 온천
-    if (req.on) {
-      if (p.bath) return { ok: true };
-      if (p.eating) return { ok: false, reason: '다 먹고 들어가요!' };
-      if (!nearSpringEdge(p.x, p.y)) return { ok: false, reason: '온천 가까이에서 들어갈 수 있어요.' };
-      // 가장자리 바로 앞이 아니라 물속으로 조금 들어간 자리에 앉기
-      const spot = WORLD.bathGrid.nearest(p.x, p.y + 26, 64) ?? WORLD.bathGrid.nearest(p.x, p.y + 6, 64);
-      if (!spot) return { ok: false, reason: '온천이 꽉 찼어요. 다른 쪽으로 가볼까요?' };
-      this.patch(id, { bath: true, x: spot.x, y: spot.y });
-      return { ok: true };
-    }
-    if (!p.bath) return { ok: true };
-    const land = WORLD.collision.nearest(p.x, p.y, 96) ?? randomSpawn();
-    this.patch(id, { bath: false, x: land.x, y: land.y });
+    // 벤치: 같은 벤치에 앉은 두 사람만
+    const partner = this.benchPartner(id);
+    if (partner === null) return { ok: false, reason: '같은 벤치에 두 사람이 앉아야 벤치 대화를 할 수 있어요.' };
+    this.hooks.emitTo(id, 'chat', msg);
+    this.hooks.emitTo(partner, 'chat', msg);
     return { ok: true };
+  }
+
+  // ---------------------------------------------------------------- 이모티콘·포즈
+
+  emote(id: number, kind: EmoteId) {
+    if (!EMOTES.includes(kind) || !this.has(id)) return;
+    if (!this.cool(id, 'emote', 500)) return;
+    this.io.to(this.channel).emit('emote', id, kind);
+  }
+
+  pose(id: number, kind: PoseId) {
+    if (!(POSES as readonly string[]).includes(kind) || !this.has(id)) return;
+    const p = this.get(id)!;
+    if (p.seat || p.bath || this.sliding.has(id)) return;
+    if (!this.cool(id, 'pose', 700)) return;
+    this.io.to(this.channel).emit('pose', id, kind, Date.now());
+  }
+
+  // ---------------------------------------------------------------- 플레이어 대상 상호작용
+
+  interact(id: number, kind: InteractionId, target: number): ActResult {
+    if (!INTERACTIONS.includes(kind)) return { ok: false, reason: '알 수 없는 동작이에요.' };
+    const p = this.get(id);
+    const t = this.get(target);
+    if (!p || !t || id === target) return { ok: false, reason: '상대를 찾을 수 없어요.' };
+    if (t.status !== 'online') return { ok: false, reason: `${t.nickname} 님은 지금 연결이 끊겨 있어요.` };
+    const def = INTERACTION_DEF[kind];
+    if (Math.hypot(p.x - t.x, p.y - t.y) > def.range) return { ok: false, reason: '조금 더 가까이 가주세요.' };
+    if (def.prank && t.noPrank) return { ok: false, reason: `${t.nickname} 님은 장난을 받지 않는 중이에요.` };
+    if (!this.cool(id, kind, def.cooldown)) return { ok: false, reason: '잠시 뒤에 다시 해보세요.' };
+
+    if (def.request) {
+      if (kind === 'follow' && (p.seat || p.bath)) return { ok: false, reason: '지금은 따라갈 수 없어요.' };
+      const reqId = this.nextReq++;
+      const r: Req = {
+        id: reqId,
+        kind: kind as 'dance' | 'follow',
+        from: id,
+        to: target,
+        timer: setTimeout(() => this.dropReq(reqId), 15_000),
+      };
+      this.reqs.set(reqId, r);
+      this.hooks.emitTo(target, 'req', { reqId, kind: r.kind, from: id, nickname: p.nickname });
+      return { ok: true };
+    }
+    if (kind === 'greet') this.io.to(this.channel).emit('pose', id, 'wave', Date.now());
+    this.io.to(this.channel).emit('fx', { kind, from: id, to: target, at: Date.now() });
+    return { ok: true };
+  }
+
+  private dropReq(reqId: number) {
+    const r = this.reqs.get(reqId);
+    if (!r) return;
+    clearTimeout(r.timer);
+    this.reqs.delete(reqId);
+  }
+
+  respond(id: number, reqId: number, accept: boolean) {
+    const r = this.reqs.get(reqId);
+    if (!r || r.to !== id) return;
+    this.dropReq(reqId);
+    const from = this.get(r.from);
+    const to = this.get(r.to);
+    if (!from || !to) return;
+    if (!accept) {
+      this.hooks.emitTo(r.from, 'info', `${to.nickname} 님이 ${r.kind === 'dance' ? '춤 신청' : '따라가기'}을 거절했어요.`);
+      return;
+    }
+    if (r.kind === 'dance') {
+      const at = Date.now();
+      this.io.to(this.channel).emit('pose', r.from, 'dance', at);
+      this.io.to(this.channel).emit('pose', r.to, 'dance', at);
+      return;
+    }
+    if (from.seat || from.bath) return;
+    this.patch(r.from, { followId: r.to });
+    this.hooks.emitTo(r.from, 'info', `${to.nickname} 님을 따라가요. 움직이면 따라가기가 끝나요.`);
+    this.hooks.emitTo(r.to, 'info', `${from.nickname} 님이 나를 따라와요.`);
+  }
+
+  unfollow(id: number) {
+    const p = this.get(id);
+    if (!p) return;
+    if (p.followId !== null) this.patch(id, { followId: null });
+    for (const o of this.all()) if (o.followId === id) this.patch(o.id, { followId: null });
+  }
+
+  setPref(id: number, noPrank: boolean) {
+    if (this.has(id)) this.patch(id, { noPrank });
+  }
+
+  // ---------------------------------------------------------------- 모닥불 질문
+
+  fireQuestion(id: number, next: boolean): string {
+    const p = this.get(id);
+    if (next && p && this.inCampfire(p) && Date.now() - this.fireQAt > 2500) {
+      let q = this.fireQ;
+      while (q === this.fireQ) q = FIRE_QUESTIONS[Math.floor(Math.random() * FIRE_QUESTIONS.length)];
+      this.fireQ = q;
+      this.fireQAt = Date.now();
+      for (const o of this.all()) if (o.id !== id && this.inCampfire(o)) this.hooks.emitTo(o.id, 'fireQ', q);
+    }
+    return this.fireQ;
   }
 }

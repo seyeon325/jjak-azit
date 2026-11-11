@@ -7,6 +7,7 @@ import type { Zone } from '../../../shared/map';
 import type { PlayerInfo } from '../../../shared/protocol';
 import { LOOKS } from '../game/art/characters';
 import { ICON } from './dom';
+import { TEAMS, teamSvg } from '../../../shared/social';
 
 interface Plate {
   el: HTMLDivElement;
@@ -38,6 +39,7 @@ export class WorldOverlay {
   readonly root: HTMLDivElement;
   private plates = new Map<number, Plate>();
   private zoneEls: { el: HTMLDivElement; x: number; y: number }[] = [];
+  private pops: { el: HTMLDivElement; x: number; y: number }[] = [];
 
   constructor(parent: HTMLElement) {
     this.root = document.createElement('div');
@@ -69,7 +71,17 @@ export class WorldOverlay {
     badge.title = info.role === 'senior' ? '선배' : '후배';
     const ico = document.createElement('i');
     ico.innerHTML = info.role === 'senior' ? ICON.crown : ICON.sprout;
-    badge.append(ico, gradeLabel(info.grade));
+    badge.append(ico, gradeLabel(info.grade, info.gradeText));
+    const team = TEAMS[info.team];
+    if (team) {
+      const t = document.createElement('span');
+      t.className = 'plate-team';
+      t.style.setProperty('--tc', team.color);
+      t.innerHTML = teamSvg(team.symbol, '#ffffff');
+      el.append(t);
+    }
+    el.style.setProperty('--team', team ? team.color : 'transparent');
+    el.classList.toggle('has-team', !!team);
     const name = document.createElement('span');
     name.className = 'plate-name';
     name.textContent = info.nickname;
@@ -89,8 +101,30 @@ export class WorldOverlay {
     p.w = 0; // 다음 렌더에서 다시 측정
   }
 
+  /** 표시 설정 (이름표·팀·말풍선 숨기기) */
+  setHidden(o: { names: boolean; teams: boolean; bubbles: boolean }) {
+    this.root.classList.toggle('hide-names', o.names);
+    this.root.classList.toggle('hide-teams', o.teams);
+    this.root.classList.toggle('hide-bubbles', o.bubbles);
+  }
+
+  /** 월드 위치에 잠깐 떠오르는 쪽지 (새 게시물 알림) */
+  pop(wx: number, wy: number, text: string, color = '#fff1a8') {
+    const el = document.createElement('div');
+    el.className = 'world-pop';
+    el.style.setProperty('--bg', color);
+    el.textContent = text;
+    this.root.appendChild(el);
+    this.pops.push({ el, x: wx, y: wy });
+    setTimeout(() => el.classList.add('out'), 4200);
+    setTimeout(() => {
+      el.remove();
+      this.pops = this.pops.filter((p) => p.el !== el);
+    }, 4700);
+  }
+
   /** 머리 위 짧은 말풍선 */
-  bubble(id: number, text: string, ms = 1800) {
+  bubble(id: number, text: string, ms = 1800, cls = '') {
     const p = this.plates.get(id);
     if (!p) return;
     if (!p.bubble) {
@@ -99,6 +133,7 @@ export class WorldOverlay {
       this.root.appendChild(p.bubble);
     }
     p.bubble.textContent = text;
+    p.bubble.className = `bubble ${cls}`;
     p.bubble.classList.remove('out');
     clearTimeout(p.bubbleTimer);
     p.bubbleTimer = window.setTimeout(() => {
@@ -188,6 +223,8 @@ export class WorldOverlay {
       p.el.classList.toggle('stacked', p.lift > 0);
       if (p.bubble) p.bubble.style.transform = `translate3d(${Math.round(p.sx)}px, ${top - 4}px, 0) translate(-50%, -100%)`;
     }
+    for (const pp of this.pops)
+      pp.el.style.transform = `translate3d(${Math.round((pp.x - v.x) * z + cam.x)}px, ${Math.round((pp.y - v.y) * z + cam.y)}px, 0) translate(-50%, -100%)`;
     for (const zl of this.zoneEls) {
       zl.el.style.transform = `translate3d(${Math.round((zl.x - v.x) * z + cam.x)}px, ${Math.round((zl.y - v.y) * z + cam.y)}px, 0) translate(-50%, -50%)`;
     }

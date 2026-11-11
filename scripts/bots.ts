@@ -17,7 +17,10 @@ const URL = process.argv[3] ?? 'http://localhost:3000';
 const NAMES = ['도토리', '말랑', '코코', '모카', '보리', '하루', '두부', '찹쌀', '나비', '별사탕', '구름', '감자', '호두', '라떼', '푸딩', '쿠키', '젤리', '모찌', '자두', '레몬', '토리', '밤톨', '솜솜', '초코', '단비', '봄봄', '새벽', '여름', '가을', '겨울'];
 
 type BotSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
-type Goal = 'wander' | 'food' | 'spring';
+type Goal = 'wander' | 'food' | 'spring' | 'bench';
+const LINES = ['안녕하세요!', '여기 너무 귀엽다', '푸드트럭 가볼 사람?', '온천 최고', '선배님 반가워요', '같이 놀아요~', '모닥불 가자!'];
+const EMOTE_LIST = ['heart', 'laugh', 'clap', 'star', 'question'] as const;
+const BENCHES = WORLD.seats.filter((x) => x.kind === 'bench' || x.kind === 'log');
 
 function startBot(i: number) {
   const s: BotSocket = io(URL, { transports: ['websocket'] });
@@ -30,6 +33,8 @@ function startBot(i: number) {
   let bath = false;
   let holding = false;
   let selfId = -1;
+  let seated = false;
+  let benchSeat: string | null = null;
   const act = (req: Parameters<ClientToServerEvents['act']>[0]) =>
     new Promise<boolean>((r) => s.emit('act', req, (res) => r(res.ok)));
 
@@ -48,6 +53,13 @@ function startBot(i: number) {
       goal = 'food';
       tx = WORLD.spots.foodtruck.x + (Math.random() - 0.5) * 40;
       ty = WORLD.spots.foodtruck.y + 8 + Math.random() * 10;
+    } else if (roll < 0.42 && roll >= 0.3) {
+      goal = 'bench';
+      const st = BENCHES[Math.floor(Math.random() * BENCHES.length)];
+      benchSeat = st.id;
+      const p = WORLD.collision.nearest(st.x, st.y + 12, 40)!;
+      tx = p.x;
+      ty = p.y;
     } else if (roll < 0.3) {
       goal = 'spring';
       tx = WORLD.spots.spring.x + (Math.random() - 0.5) * 50;
@@ -64,6 +76,17 @@ function startBot(i: number) {
   const arrive = async () => {
     s.emit('m', [pos.x, pos.y, dir, 0]);
     pause = 1 + Math.random() * 3;
+    if (seated) {
+      await act({ t: 'stand' });
+      seated = false;
+    }
+    if (Math.random() < 0.25) s.emit('chat', { ch: 'all', text: LINES[Math.floor(Math.random() * LINES.length)] }, () => {});
+    if (Math.random() < 0.3) s.emit('emote', EMOTE_LIST[Math.floor(Math.random() * EMOTE_LIST.length)]);
+    if (goal === 'bench' && benchSeat && (await act({ t: 'sit', seat: benchSeat }))) {
+      seated = true;
+      pause = 4 + Math.random() * 6;
+      return;
+    }
     if (bath && Math.random() < 0.35) {
       if (await act({ t: 'bath', on: false })) bath = false;
     } else if (goal === 'food' && !holding) {

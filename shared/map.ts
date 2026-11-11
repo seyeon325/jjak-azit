@@ -31,7 +31,6 @@ export type PropKind =
   | 'sign'
   | 'campfire'
   | 'log'
-  | 'logV'
   | 'tent'
   | 'lantern'
   | 'slide'
@@ -92,6 +91,17 @@ export interface Spot {
   r: number;
 }
 
+export type SeatKind = 'bench' | 'log' | 'swing' | 'seesaw' | 'spring';
+export interface Seat {
+  id: string;
+  kind: SeatKind;
+  /** 같은 벤치/통나무/놀이기구 묶음 */
+  group: string;
+  x: number;
+  y: number;
+  dir: 0 | 1 | 2 | 3;
+}
+
 export interface WorldMap {
   cols: number;
   rows: number;
@@ -103,7 +113,9 @@ export interface WorldMap {
   /** 온천 안에서의 충돌 (물 안쪽만 이동 가능) */
   bathGrid: CollisionGrid;
   spawn: { x: number; y: number; w: number; h: number };
-  spots: { foodtruck: Spot; board: Spot; spring: Spot };
+  spots: { foodtruck: Spot; board: Spot; spring: Spot; campfire: Spot };
+  seats: Seat[];
+  slide: { enter: { x: number; y: number }; top: { x: number; y: number }; bottom: { x: number; y: number }; exit: { x: number; y: number } };
 }
 
 // ---------------------------------------------------------------- 충돌 격자
@@ -301,10 +313,11 @@ function buildMap(): WorldMap {
   const fx = px(11) + 8;
   const fy = px(26) + 12;
   add({ kind: 'campfire', x: fx, y: fy, foot: [16, 8] });
-  add({ kind: 'log', x: fx, y: fy - 30, foot: [28, 6] });
-  add({ kind: 'log', x: fx, y: fy + 30, foot: [28, 6] });
-  add({ kind: 'logV', x: fx - 42, y: fy + 10, foot: [8, 20] });
-  add({ kind: 'logV', x: fx + 42, y: fy + 10, foot: [8, 20], flip: true });
+  // 통나무 벤치 4개가 모닥불을 둘러쌈 (모두 바닥에 가로로 누운 형태)
+  add({ kind: 'log', x: fx, y: fy - 28, foot: [26, 5] });
+  add({ kind: 'log', x: fx, y: fy + 32, foot: [26, 5] });
+  add({ kind: 'log', x: fx - 46, y: fy + 2, foot: [26, 5] });
+  add({ kind: 'log', x: fx + 46, y: fy + 2, foot: [26, 5], flip: true });
   add({ kind: 'tent', x: px(5) + 6, y: px(23) + 4, foot: [34, 12] });
   add({ kind: 'lantern', x: px(16) + 8, y: px(23), foot: [4, 4] });
   add({ kind: 'lantern', x: px(6), y: px(30) + 4, foot: [4, 4] });
@@ -425,16 +438,16 @@ function buildMap(): WorldMap {
     {
       id: 'campfire',
       name: '모닥불 쉼터',
-      desc: '모닥불 곁에 모여 쉬어가요. 대화 기능은 2차 업데이트 예정이에요.',
-      phase: 2,
+      desc: '통나무에 둘러앉아 이야기해요. 여기서 하는 채팅은 모닥불 주변 사람에게만 전달돼요.',
+      phase: 1,
       rect: { x: px(2), y: px(21), w: px(17), h: px(11) },
       label: { x: px(11), y: px(21) + 4 },
     },
     {
       id: 'playground',
       name: '놀이터',
-      desc: '장난 기믹과 상호작용은 2차 업데이트에서 추가돼요.',
-      phase: 2,
+      desc: '그네·미끄럼틀·시소·스프링을 타 보세요. 그네 타는 친구를 밀어줄 수도 있어요!',
+      phase: 1,
       rect: { x: px(40), y: px(20), w: px(18), h: px(12) },
       label: { x: px(49), y: px(20) + 6 },
     },
@@ -456,7 +469,40 @@ function buildMap(): WorldMap {
     },
   ];
 
+  // ------------------------------------------------------------ 좌석·놀이기구
+  const seats: Seat[] = [];
+  let benchN = 0;
+  let logN = 0;
+  for (const p of props) {
+    if (p.kind === 'bench') {
+      const g = `bench${benchN++}`;
+      seats.push({ id: `${g}-0`, kind: 'bench', group: g, x: p.x - 7, y: p.y + 1, dir: 0 });
+      seats.push({ id: `${g}-1`, kind: 'bench', group: g, x: p.x + 7, y: p.y + 1, dir: 0 });
+    }
+    if (p.kind === 'log') {
+      const g = `log${logN++}`;
+      const north = p.y < fy - 10;
+      const south = p.y > fy + 10;
+      const west = !north && !south && p.x < fx;
+      const dir = north ? 0 : south ? 1 : west ? 3 : 2;
+      seats.push({ id: `${g}-0`, kind: 'log', group: g, x: p.x - 7, y: p.y + 1, dir });
+      seats.push({ id: `${g}-1`, kind: 'log', group: g, x: p.x + 7, y: p.y + 1, dir });
+    }
+  }
+  seats.push({ id: 'swing-0', kind: 'swing', group: 'swing', x: px(53) - 7, y: px(24) - 4, dir: 0 });
+  seats.push({ id: 'swing-1', kind: 'swing', group: 'swing', x: px(53) + 6, y: px(24) - 4, dir: 0 });
+  seats.push({ id: 'seesaw-0', kind: 'seesaw', group: 'seesaw', x: px(45) - 18, y: px(29) - 4, dir: 3 });
+  seats.push({ id: 'seesaw-1', kind: 'seesaw', group: 'seesaw', x: px(45) + 18, y: px(29) - 4, dir: 2 });
+  seats.push({ id: 'spring-0', kind: 'spring', group: 'spring', x: px(49) + 1, y: px(27) - 2, dir: 2 });
+
   return {
+    seats,
+    slide: {
+      enter: { x: px(44) + 16, y: px(24) + 16 },
+      top: { x: px(44) + 14, y: px(22) + 4 },
+      bottom: { x: px(43) + 2, y: px(24) + 4 },
+      exit: { x: px(42) + 14, y: px(25) + 6 },
+    },
     cols,
     rows,
     tiles,
@@ -469,6 +515,7 @@ function buildMap(): WorldMap {
       foodtruck: { x: px(11), y: px(7) + 2, r: INTERACT_RANGE + 18 },
       board: { x: px(30), y: px(15) + 10, r: INTERACT_RANGE + 6 },
       spring: { x: px(30), y: px(28) + 8, r: 92 },
+      campfire: { x: fx, y: fy - 4, r: 72 },
     },
   };
 }

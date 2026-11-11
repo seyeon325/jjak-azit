@@ -7,6 +7,8 @@ export interface Session {
   token: string;
   playerId: number;
   nickname: string;
+  /** 기기 키에서 만든 안정적인 사용자 식별자 (게시물 소유권·팀 배정 유지) */
+  ownerKey: string;
   socketId: string | null;
   graceTimer: NodeJS.Timeout | null;
 }
@@ -14,14 +16,19 @@ export interface Session {
 export class SessionStore {
   private byToken = new Map<string, Session>();
 
-  create(token: string, playerId: number, nickname: string): Session {
-    const s: Session = { token, playerId, nickname, socketId: null, graceTimer: null };
+  create(token: string, playerId: number, nickname: string, ownerKey: string): Session {
+    const s: Session = { token, playerId, nickname, ownerKey, socketId: null, graceTimer: null };
     this.byToken.set(token, s);
     return s;
   }
 
   get(token: string | undefined): Session | undefined {
     return token ? this.byToken.get(token) : undefined;
+  }
+
+  byPlayer(playerId: number): Session | undefined {
+    for (const s of this.byToken.values()) if (s.playerId === playerId) return s;
+    return undefined;
   }
 
   delete(token: string) {

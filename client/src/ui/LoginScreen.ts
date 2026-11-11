@@ -1,5 +1,6 @@
 /** 접속 화면: 닉네임 → 학년 → 선배/후배 → 캐릭터 → 입장 */
-import { LOOK_COUNT, NICK_MAX } from '../../../shared/constants';
+import { GRADE_TEXT_MAX, LOOK_COUNT, NICK_MAX } from '../../../shared/constants';
+import { TEAMS, teamSvg } from '../../../shared/social';
 import { gradeLabel } from '../../../shared/foods';
 import type { Grade, Profile, Role } from '../../../shared/protocol';
 import { LOOKS } from '../game/art/characters';
@@ -16,6 +17,10 @@ export class LoginScreen {
   private submitBtn: HTMLButtonElement;
   private role: Role | null = null;
   private grade: Grade | null = null;
+  private team = -1;
+  private gradeInput: HTMLInputElement;
+  private gradeOther: HTMLElement;
+  private teamBtns: HTMLButtonElement[] = [];
   private look = 0;
   private big: CharacterPreview;
   private plate: HTMLDivElement;
@@ -31,12 +36,14 @@ export class LoginScreen {
   constructor(
     private onSubmit: (p: Profile) => Promise<string | null>,
     initial: Partial<Profile> | null,
+    private teamNames: string[] = TEAMS.map((t) => t.defaultName),
   ) {
     // 이전 버전에 저장된 프로필(학년 없음)도 그대로 불러옵니다
     if (initial) {
       if (initial.role === 'senior' || initial.role === 'junior') this.role = initial.role;
       if (typeof initial.grade === 'number' && GRADES.includes(initial.grade)) this.grade = initial.grade;
       this.look = Number.isInteger(initial.look) && initial.look! >= 0 && initial.look! < LOOK_COUNT ? initial.look! : 0;
+      if (typeof initial.team === 'number' && TEAMS.some((t) => t.id === initial.team)) this.team = initial.team;
     } else {
       this.look = Math.floor(Math.random() * LOOK_COUNT);
     }
@@ -56,6 +63,27 @@ export class LoginScreen {
     if (initial?.nickname) this.nick.value = initial.nickname;
     this.counter = h('span', { class: 'counter' });
 
+    this.gradeInput = h('input', {
+      type: 'text',
+      maxlength: GRADE_TEXT_MAX * 2,
+      placeholder: '예: 교수, 조교, 졸업생',
+      autocomplete: 'off',
+      oninput: () => this.refresh(),
+    });
+    if (initial?.gradeText) this.gradeInput.value = initial.gradeText;
+    this.gradeOther = h('div', { class: 'grade-other hidden' }, h('label', {}, '소속을 직접 적어주세요 (선택)'), this.gradeInput);
+    const teamRow = h('div', { class: 'team-row', role: 'radiogroup', 'aria-label': '팀' });
+    [...TEAMS.map((t) => t.id), -1].forEach((id) => {
+      const t = TEAMS[id];
+      const b = h(
+        'button',
+        { type: 'button', class: 'team-btn', role: 'radio', style: t ? `--tc:${t.color};--td:${t.dark}` : '', onclick: () => this.setTeam(id) },
+        t ? h('i', { html: teamSvg(t.symbol, '#ffffff') }) : h('i', { class: 'none' }, '?'),
+        h('span', {}, t ? this.teamNames[id] ?? t.defaultName : '미정'),
+      );
+      this.teamBtns.push(b);
+      teamRow.append(b);
+    });
     const gradeRow = h('div', { class: 'grade-row', role: 'radiogroup', 'aria-label': '학년' });
     for (const g of GRADES) {
       const b = h(
@@ -153,9 +181,10 @@ export class LoginScreen {
         h('label', { class: 'step-title', for: 'nick' }, h('b', {}, '1'), '닉네임'),
         h('div', { class: 'nick-field' }, this.nick, this.counter),
       ),
-      step(2, '학년', gradeRow),
+      step(2, '학년', gradeRow, this.gradeOther),
       step(3, '나는…', h('div', { class: 'role-row' }, this.roleBtns.senior, this.roleBtns.junior)),
-      step(4, '캐릭터 고르기', stage, lookGrid),
+      step(4, '우리 팀', teamRow),
+      step(5, '캐릭터 고르기', stage, lookGrid),
       this.submitBtn,
       this.msg,
     );
@@ -181,6 +210,14 @@ export class LoginScreen {
   private setGrade(g: Grade) {
     this.grade = g;
     this.refresh();
+    if (g === 0) setTimeout(() => this.gradeInput.focus(), 50);
+  }
+  private setTeam(t: number) {
+    this.team = t;
+    this.refresh();
+  }
+  private gradeTextValue() {
+    return Array.from(this.gradeInput.value.replace(/\s+/g, ' ').trim()).slice(0, GRADE_TEXT_MAX).join('');
   }
   private setLook(i: number) {
     this.look = i;
@@ -200,6 +237,12 @@ export class LoginScreen {
       this.roleBtns[r].classList.toggle('on', this.role === r);
       this.roleBtns[r].setAttribute('aria-pressed', String(this.role === r));
     }
+    this.gradeOther.classList.toggle('hidden', this.grade !== 0);
+    this.teamBtns.forEach((b, i) => {
+      const id = i < TEAMS.length ? i : -1;
+      b.classList.toggle('on', id === this.team);
+      b.setAttribute('aria-checked', String(id === this.team));
+    });
     this.gradeBtns.forEach((b, i) => {
       b.classList.toggle('on', GRADES[i] === this.grade);
       b.setAttribute('aria-checked', String(GRADES[i] === this.grade));
@@ -220,8 +263,13 @@ export class LoginScreen {
     p.className = `plate preview-plate ${this.role ?? 'no-role'}`;
     const badge = h('span', { class: 'plate-role' });
     if (this.role) badge.append(h('i', { html: this.role === 'senior' ? ICON.crown : ICON.sprout }));
-    badge.append(this.grade === null ? '학년' : gradeLabel(this.grade));
-    p.replaceChildren(badge, h('span', { class: 'plate-name' }, this.nickValue() || '닉네임'));
+    badge.append(this.grade === null ? '학년' : gradeLabel(this.grade, this.gradeTextValue()));
+    const tm = TEAMS[this.team];
+    p.replaceChildren(
+      badge,
+      h('span', { class: 'plate-name' }, this.nickValue() || '닉네임'),
+      ...(tm ? [h('span', { class: 'plate-team', style: `--tc:${tm.color}`, html: teamSvg(tm.symbol, '#ffffff') })] : []),
+    );
   }
 
   setMessage(text: string, kind: 'error' | 'info' = 'error') {
@@ -249,7 +297,15 @@ export class LoginScreen {
     this.submitBtn.disabled = true;
     this.submitBtn.textContent = '입장하는 중…';
     this.setMessage('', 'info');
-    const err = await this.onSubmit({ nickname, role: this.role, grade: this.grade, look: this.look, color: 0 });
+    const err = await this.onSubmit({
+      nickname,
+      role: this.role,
+      grade: this.grade,
+      gradeText: this.grade === 0 ? this.gradeTextValue() : '',
+      team: this.team,
+      look: this.look,
+      color: 0,
+    });
     this.busy = false;
     this.submitBtn.disabled = false;
     this.submitBtn.textContent = '아지트 입장하기';

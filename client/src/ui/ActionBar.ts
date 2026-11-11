@@ -1,9 +1,6 @@
 /**
- * 상호작용 버튼: 상호작용 지점 근처에서만 나타납니다.
- * 푸드트럭 → '메뉴 보기' / 음식을 들고 있으면 → '먹기'
- * 온천 가장자리 → '온천 들어가기' / 온천 안 → '나가기'
- * 게시판 앞 → '게시판'
- * PC: E 또는 스페이스 = 첫 번째 버튼
+ * 상황별 상호작용 버튼 (오른쪽 아래). 가까운 대상부터 최대 3개를 보여줍니다.
+ * PC: E · 스페이스 · 엔터 = 첫 번째(가장 가까운) 버튼
  */
 import type { InteractState } from '../game/scenes/WorldScene';
 import { buildFood } from '../game/art/foods';
@@ -14,15 +11,27 @@ export interface ActionHandlers {
   onEat: () => void;
   onBath: (on: boolean) => void;
   onBoard: () => void;
+  onSit: (seat: string) => void;
+  onStand: () => void;
+  onSlide: () => void;
+  onPush: (seat: string) => void;
+  onPlayer: (id: number) => void;
+  onFireChat: () => void;
+  onUnfollow: () => void;
 }
 
 interface Btn {
   id: string;
   label: string;
-  kind: 'food' | 'eat' | 'bath' | 'out' | 'board';
+  kind: string;
   run: () => void;
   food?: string;
+  /** 정렬용 거리 (작을수록 먼저) */
+  d: number;
 }
+
+const SIT_LABEL: Record<string, string> = { bench: '앉기', log: '앉기', swing: '그네 타기', seesaw: '시소 타기', spring: '스프링 타기' };
+const STAND_LABEL: Record<string, string> = { bench: '일어나기', log: '일어나기', swing: '내리기', seesaw: '내리기', spring: '내리기' };
 
 export class ActionBar {
   readonly el: HTMLElement;
@@ -35,7 +44,6 @@ export class ActionBar {
     window.addEventListener('keydown', this.onKey);
   }
 
-  /** 시트가 열려 있으면 단축키 잠시 끄기 */
   suspend(v: boolean) {
     this.suspended = v;
   }
@@ -61,18 +69,29 @@ export class ActionBar {
   }
 
   update(s: InteractState) {
-    const btns: Btn[] = [];
-    if (s.bath) btns.push({ id: 'out', label: '나가기', kind: 'out', run: () => this.handlers.onBath(false) });
+    const H = this.handlers;
+    let btns: Btn[] = [];
+    if (s.sliding) btns = [];
+    else if (s.seated) {
+      btns.push({ id: 'stand', label: STAND_LABEL[s.seated.kind] ?? '일어나기', kind: 'out', d: 0, run: () => H.onStand() });
+      if (s.inFire) btns.push({ id: 'firechat', label: '모닥불 대화', kind: 'fire', d: 1, run: () => H.onFireChat() });
+    } else if (s.bath) btns.push({ id: 'out', label: '나가기', kind: 'out', d: 0, run: () => H.onBath(false) });
     else {
-      if (s.food && !s.eating) {
-        btns.push({ id: 'eat', label: '먹기', kind: 'eat', food: s.food, run: () => this.handlers.onEat() });
-      }
-      if (s.nearFood && !s.food && !s.eating) btns.push({ id: 'menu', label: '메뉴 보기', kind: 'food', run: () => this.handlers.onMenu() });
-      if (s.nearSpring && !s.eating) btns.push({ id: 'bath', label: '온천 들어가기', kind: 'bath', run: () => this.handlers.onBath(true) });
-      if (s.nearBoard) btns.push({ id: 'board', label: '게시판', kind: 'board', run: () => this.handlers.onBoard() });
+      if (s.food && !s.eating) btns.push({ id: 'eat', label: '먹기', kind: 'eat', food: s.food, d: 5, run: () => H.onEat() });
+      if (s.nearFood && !s.food && !s.eating) btns.push({ id: 'menu', label: '메뉴 보기', kind: 'food', d: 10, run: () => H.onMenu() });
+      if (s.nearSpring && !s.eating) btns.push({ id: 'bath', label: '온천 들어가기', kind: 'bath', d: 12, run: () => H.onBath(true) });
+      if (s.nearBoard) btns.push({ id: 'board', label: '게시판', kind: 'board', d: 14, run: () => H.onBoard() });
+      if (s.seat && !s.eating) btns.push({ id: `sit:${s.seat.id}`, label: SIT_LABEL[s.seat.kind] ?? '앉기', kind: 'sit', d: s.seat.d, run: () => H.onSit(s.seat!.id) });
+      if (s.push) btns.push({ id: `push:${s.push.seat}`, label: `밀기 (${s.push.name})`, kind: 'push', d: s.push.d - 4, run: () => H.onPush(s.push!.seat) });
+      if (s.nearSlide !== null && !s.eating) btns.push({ id: 'slide', label: '미끄러지기', kind: 'slide', d: s.nearSlide, run: () => H.onSlide() });
+      if (s.inFire && !s.seat) btns.push({ id: 'firechat', label: '대화 참여', kind: 'fire', d: 30, run: () => H.onFireChat() });
+      if (s.player) btns.push({ id: `p:${s.player.id}`, label: `${s.player.name} 님`, kind: 'player', d: s.player.d + 8, run: () => H.onPlayer(s.player!.id) });
+      if (s.following !== null) btns.push({ id: 'unfollow', label: '따라가기 그만', kind: 'out', d: 1, run: () => H.onUnfollow() });
+      btns.sort((a, b) => a.d - b.d);
+      btns = btns.slice(0, 3);
     }
-    const key = btns.map((b) => b.id + (b.food ?? '')).join('|');
-    const prev = this.buttons.map((b) => b.id + (b.food ?? '')).join('|');
+    const key = btns.map((b) => b.id + b.label).join('|');
+    const prev = this.buttons.map((b) => b.id + b.label).join('|');
     this.buttons = btns;
     if (key === prev) return;
     this.el.replaceChildren(

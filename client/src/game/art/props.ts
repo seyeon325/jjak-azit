@@ -289,17 +289,41 @@ function flameSheet(): PixelCanvas {
 
 function log(vertical: boolean): PixelCanvas {
   if (!vertical) {
-    const pc = new PixelCanvas(32, 14);
-    pc.rect(2, 3, 26, 8, '#b07a52');
-    pc.hline(2, 27, 3, '#c99167');
-    pc.hline(2, 27, 10, '#8a5a3e');
-    for (const x of [7, 14, 21]) {
-      pc.set(x, 5, '#8a5a3e');
-      pc.set(x + 1, 6, '#8a5a3e');
-      pc.set(x + 2, 8, '#8a5a3e');
+    // 바닥에 가로로 누운 통나무 벤치 (위에서 비스듬히 본 모습: 윗면 밝게, 아래 그늘, 양쪽 나이테)
+    const W = 36;
+    const pc = new PixelCanvas(W, 14);
+    for (let x = 4; x < W - 4; x++) {
+      for (let y = 3; y <= 10; y++) {
+        let c = '#a8714f';
+        if (y <= 4) c = '#d6a476';
+        else if (y <= 6) c = '#c08a5e';
+        else if (y >= 9) c = '#7f5238';
+        if ((x * 7 + y * 3) % 11 === 0 && y > 4 && y < 9) c = '#8a5a3e';
+        pc.set(x, y, c);
+      }
     }
-    pc.ellipse(28, 7, 3, 4.5, (dx, dy) => (dx * dx + dy * dy < 0.25 ? '#d9a877' : dx * dx + dy * dy < 0.55 ? '#e8c095' : '#d1996a'));
+    // 앉는 자리 살짝 반들반들
+    for (const cx of [11, 24]) pc.hline(cx - 3, cx + 3, 4, '#e3b88a');
+    // 양쪽 끝 나이테
+    for (const [cx, flip] of [[4, -1], [W - 5, 1]] as [number, number][]) {
+      pc.ellipse(cx, 6.5, 2.6, 4.2, (dx, dy) => {
+        const d = dx * dx + dy * dy;
+        if (flip < 0 && dx > 0.2) return null;
+        return d < 0.18 ? '#c48c5c' : d < 0.5 ? '#e8c095' : d < 0.75 ? '#d9a877' : '#b07a52';
+      });
+    }
+    // 잔가지 + 이끼
+    pc.set(15, 2, '#8a5a3e');
+    pc.set(16, 1, '#8a5a3e');
+    pc.set(16, 2, '#7fc76b');
+    pc.set(27, 3, '#7fc76b');
+    pc.set(28, 3, '#5fa75a');
     pc.outline(OUT);
+    // 땅에 닿은 풀
+    for (const x of [6, 13, 21, 29]) {
+      pc.set(x, 12, '#6faa5a');
+      pc.set(x + 1, 11, '#86c36a');
+    }
     return pc;
   }
   const pc = new PixelCanvas(14, 28);
@@ -675,9 +699,6 @@ export function buildProp(kind: PropKind, label?: string): PropArt {
     case 'log':
       pc = log(false);
       break;
-    case 'logV':
-      pc = log(true);
-      break;
     case 'tent':
       pc = tent();
       break;
@@ -807,8 +828,7 @@ export const PROP_SHADOW: Partial<Record<PropKind, [number, number]>> = {
   pot: [6, 2],
   sign: [5, 2],
   campfire: [13, 4],
-  log: [14, 3],
-  logV: [6, 3],
+  log: [17, 3],
   tent: [20, 4],
   lantern: [4, 2],
   slide: [20, 4],

@@ -4,7 +4,8 @@
  * mode 'player' = 참가자 화면 / 'screen' = 운영자 관전 화면
  */
 import Phaser from 'phaser';
-import { BATH_SPEED, MOVE_SPEED, SEND_HZ, WORLD_H, WORLD_W } from '../../../../shared/constants';
+import { BATH_SPEED, CAMPFIRE_R, MOVE_SPEED, SEAT_RANGE, SEND_HZ, SLIDE_MS, WORLD_H, WORLD_W } from '../../../../shared/constants';
+import type { FxEvent } from '../../../../shared/protocol';
 import { foodDef } from '../../../../shared/foods';
 import { nearSpot, nearSpringEdge, T, WORLD, zoneAt, type TileType, type Zone } from '../../../../shared/map';
 import type { Dir, FoodId, PlayerInfo } from '../../../../shared/protocol';
@@ -24,6 +25,18 @@ export interface InteractState {
   bath: boolean;
   food: FoodId | null;
   eating: boolean;
+  /** 가장 가까운 빈 좌석/놀이기구 */
+  seat: { id: string; kind: string; d: number } | null;
+  /** 앉아 있는 좌석 */
+  seated: { id: string; kind: string } | null;
+  /** 그네 밀어줄 수 있는 대상 */
+  push: { seat: string; name: string; d: number } | null;
+  nearSlide: number | null;
+  inFire: boolean;
+  /** 가장 가까운 다른 참가자 */
+  player: { id: number; name: string; d: number } | null;
+  following: number | null;
+  sliding: boolean;
 }
 
 export interface GameContext {
@@ -35,10 +48,13 @@ export interface GameContext {
   onZoneChange?: (zone: Zone | null) => void;
   onInteract?: (s: InteractState) => void;
   onBoardTap?: () => void;
+  onPlayerTap?: (id: number) => void;
+  /** 관전 화면: 추적 대상이 사라졌을 때 */
+  onTrackLost?: () => void;
   onReady?: () => void;
 }
 
-export type ScreenCamMode = 'all' | 'follow';
+export type ScreenCamMode = 'all' | 'follow' | 'track' | 'free' | 'photo';
 
 const SEP_RADIUS = 9;
 
@@ -52,6 +68,10 @@ export class WorldScene extends Phaser.Scene {
   private interactKey = '';
   private unsubs: (() => void)[] = [];
   screenCamMode: ScreenCamMode = 'all';
+  trackId: number | null = null;
+  private freeCam = { x: WORLD_W / 2, y: WORLD_H / 2, z: 0 };
+  private seesawImg: Phaser.GameObjects.Image | null = null;
+  private showTeams = true;
 
   constructor() {
     super('world');
@@ -92,6 +112,8 @@ export class WorldScene extends Phaser.Scene {
         if (!a) return;
         if (patch.bath !== undefined) a.setBath(patch.bath);
         if (patch.food !== undefined) a.setFood(patch.food);
+        if (patch.seat !== undefined) a.setSeat(patch.seat);
+        if (patch.team !== undefined) a.setTeam(patch.team);
         if (patch.x !== undefined && patch.y !== undefined) {
           a.setPose(patch.x, patch.y, a.dir, false);
           if (a === this.self) this.lastSent.x = NaN;
@@ -100,6 +122,18 @@ export class WorldScene extends Phaser.Scene {
       }),
       store.on('eat', (info, food) => {
         this.avatars.get(info.id)?.playEat(food);
+      }),
+      store.on('emote', (info, kind) => this.avatars.get(info.id)?.showEmote(kind)),
+      store.on('pose', (info, kind) => {
+        const a = this.avatars.get(info.id);
+        if (!a) return;
+        a.playPoseAnim(kind);
+        if (kind === 'dance') this.dancePuff(a);
+      }),
+      store.on('fx', (ev) => this.playFx(ev)),
+      store.on('display', (d) => {
+        this.showTeams = !d.hideTeams;
+        for (const a of this.avatars.values()) a.setShowTeam(this.showTeams);
       }),
     );
     this.rebuildAvatars();
@@ -137,6 +171,7 @@ export class WorldScene extends Phaser.Scene {
         obj.on('pointerup', () => this.ctx.onBoardTap?.());
       }
       if (p.kind === 'foodtruck') this.addTruckLights(p.x, p.y);
+      if (p.kind === 'seesaw') this.seesawImg = obj as Phaser.GameObjects.Image;
     }
     this.addSpringFx();
     this.addPetals();
@@ -280,7 +315,12 @@ export class WorldScene extends Phaser.Scene {
     const isSelf = info.id === this.ctx.store.selfId;
     const a = new Avatar(this, info, isSelf, (_kind, text) => this.ctx.overlay.bubble(info.id, text));
     this.avatars.set(info.id, a);
+    a.setShowTeam(this.showTeams);
     this.ctx.overlay.upsert(info, isSelf);
+    if (!isSelf && this.ctx.mode === 'player') {
+      a.sprite.setInteractive({ useHandCursor: true });
+      a.sprite.on('pointerup', () => this.ctx.onPlayerTap?.(info.id));
+    }
     if (isSelf) {
       this.self = a;
       const cam = this.cameras.main;
@@ -300,6 +340,11 @@ export class WorldScene extends Phaser.Scene {
     a.destroy();
     this.avatars.delete(id);
     this.ctx.overlay.remove(id);
+    if (id === this.trackId) {
+      this.trackId = null;
+      this.screenCamMode = 'all';
+      this.ctx.onTrackLost?.();
+    }
   }
 
   // -------------------------------------------------------------- 카메라
@@ -334,7 +379,24 @@ export class WorldScene extends Phaser.Scene {
     let tz = fit;
     let tx = WORLD_W / 2;
     let ty = WORLD_H / 2;
-    if (this.screenCamMode === 'follow') {
+    const mode = this.screenCamMode;
+    if (mode === 'free') {
+      if (!this.freeCam.z) this.freeCam = { x: cam.midPoint.x, y: cam.midPoint.y, z: cam.zoom };
+      tz = this.freeCam.z;
+      tx = this.freeCam.x;
+      ty = this.freeCam.y;
+    }
+    if (mode === 'track') {
+      const a = this.trackId !== null ? this.avatars.get(this.trackId) : undefined;
+      if (a) {
+        tz = Phaser.Math.Clamp(fit * 2.6, fit, 4);
+        const hw = cam.width / tz / 2;
+        const hh = cam.height / tz / 2;
+        tx = Phaser.Math.Clamp(a.displayX, hw, WORLD_W - hw);
+        ty = Phaser.Math.Clamp(a.displayY - 8, hh, WORLD_H - hh);
+      }
+    }
+    if (mode === 'follow' || mode === 'photo') {
       let minX = Infinity;
       let minY = Infinity;
       let maxX = -Infinity;
@@ -347,7 +409,7 @@ export class WorldScene extends Phaser.Scene {
         maxY = Math.max(maxY, a.y);
       }
       if (minX !== Infinity) {
-        const pad = 90;
+        const pad = mode === 'photo' ? 48 : 90;
         const bw = maxX - minX + pad * 2;
         const bh = maxY - minY + pad * 2;
         tz = Phaser.Math.Clamp(Math.min(cam.width / bw, cam.height / bh), fit, 3.2);
@@ -383,6 +445,8 @@ export class WorldScene extends Phaser.Scene {
     // 2) 내 캐릭터: 입력 → 충돌 → 전송
     if (this.self) this.updateSelf(dt);
 
+    this.updateRides();
+
     // 3) 겹침 완화 (시각적)
     this.separate(dt);
     for (const [id, a] of this.avatars) {
@@ -396,9 +460,24 @@ export class WorldScene extends Phaser.Scene {
   private updateSelf(dt: number) {
     const self = this.self!;
     const grid = self.bath ? WORLD.bathGrid : WORLD.collision;
-    const raw = this.ctx.input?.vector() ?? { x: 0, y: 0 };
-    // 먹는 동안에는 잠깐 멈춤
-    const v = self.eating ? { x: 0, y: 0 } : raw;
+    let raw = this.ctx.input?.vector() ?? { x: 0, y: 0 };
+    // 따라가기: 직접 움직이면 끝, 아니면 상대 쪽으로 자동 이동
+    const followId = this.ctx.store.self?.followId ?? null;
+    if (followId !== null) {
+      if (raw.x || raw.y) this.ctx.net.socket.emit('unfollow');
+      else {
+        const t = this.avatars.get(followId);
+        if (!t || t.bath || Math.hypot(t.x - self.x, t.y - self.y) > 260) this.ctx.net.socket.emit('unfollow');
+        else {
+          const ddx = t.x - self.x;
+          const ddy = t.y - self.y;
+          const d = Math.hypot(ddx, ddy);
+          if (d > 22) raw = { x: ddx / d, y: ddy / d };
+        }
+      }
+    }
+    // 먹는 중·앉은 중·미끄럼틀 타는 중에는 멈춤
+    const v = self.eating || self.seat || self.scripted ? { x: 0, y: 0 } : raw;
     const moving = v.x !== 0 || v.y !== 0;
     const speed = MOVE_SPEED * (self.bath ? BATH_SPEED : 1);
     let dx = v.x * speed * dt;
@@ -432,7 +511,7 @@ export class WorldScene extends Phaser.Scene {
     const ls = this.lastSent;
     const changedState = ls.moving !== moving || ls.dir !== dir;
     const moved = Math.abs(ls.x - self.x) > 0.05 || Math.abs(ls.y - self.y) > 0.05 || Number.isNaN(ls.x);
-    if ((changedState && !moving) || ((moved || changedState) && this.sendAcc >= 1 / SEND_HZ)) {
+    if (!self.seat && !self.scripted && ((changedState && !moving) || ((moved || changedState) && this.sendAcc >= 1 / SEND_HZ))) {
       this.sendAcc = 0;
       const x = Math.round(self.x * 10) / 10;
       const y = Math.round(self.y * 10) / 10;
@@ -457,6 +536,7 @@ export class WorldScene extends Phaser.Scene {
       bath: self.bath,
       food: self.food,
       eating: self.eating,
+      ...this.nearbyInfo(self),
     };
     const key = JSON.stringify(st);
     if (key !== this.interactKey) {
@@ -499,6 +579,223 @@ export class WorldScene extends Phaser.Scene {
       a.sepX += (tx - a.sepX) * k;
       a.sepY += (ty - a.sepY) * k;
     }
+  }
+
+  /** 근처 좌석·놀이기구·참가자 판정 */
+  private nearbyInfo(self: Avatar) {
+    const store = this.ctx.store;
+    const occupied = new Map<string, PlayerInfo>();
+    for (const e of store.players.values()) if (e.info.seat) occupied.set(e.info.seat, e.info);
+    let seat: InteractState['seat'] = null;
+    let push: InteractState['push'] = null;
+    if (!self.seat && !self.bath) {
+      for (const st of WORLD.seats) {
+        const d = Math.hypot(self.x - st.x, self.y - st.y);
+        if (d > SEAT_RANGE + 6) continue;
+        const who = occupied.get(st.id);
+        if (!who && (!seat || d < seat.d)) seat = { id: st.id, kind: st.kind, d };
+        if (who && st.kind === 'swing' && who.id !== store.selfId && d < 46 && (!push || d < push.d))
+          push = { seat: st.id, name: who.nickname, d };
+      }
+      // 그네는 조금 멀리서도 밀 수 있게
+      for (const st of WORLD.seats) {
+        if (st.kind !== 'swing') continue;
+        const who = occupied.get(st.id);
+        const d = Math.hypot(self.x - st.x, self.y - st.y);
+        if (who && who.id !== store.selfId && d < 46 && (!push || d < push.d)) push = { seat: st.id, name: who.nickname, d };
+      }
+    }
+    const sl = WORLD.slide.enter;
+    const ds = Math.hypot(self.x - sl.x, self.y - sl.y);
+    const fire = WORLD.spots.campfire;
+    let player: InteractState['player'] = null;
+    for (const a of this.avatars.values()) {
+      if (a === self || a.away) continue;
+      const d = Math.hypot(a.x - self.x, a.y - self.y);
+      if (d < 64 && (!player || d < player.d)) player = { id: a.info.id, name: a.info.nickname, d };
+    }
+    return {
+      seat,
+      seated: self.seat ? { id: self.seat.id, kind: self.seat.kind } : null,
+      push,
+      nearSlide: !self.seat && !self.bath && ds < SEAT_RANGE + 6 ? ds : null,
+      inFire: Math.hypot(self.x - fire.x, self.y - fire.y) <= CAMPFIRE_R,
+      player: self.bath ? null : player,
+      following: store.self?.followId ?? null,
+      sliding: self.scripted,
+    };
+  }
+
+  /** 그네·시소·스프링 움직임 (모든 화면에서 같은 시간 기준) */
+  private updateRides() {
+    const t = Date.now() / 1000;
+    const occupants = new Map<string, Avatar>();
+    for (const a of this.avatars.values()) if (a.seat) occupants.set(a.seat.id, a);
+    const seesawBoth = occupants.has('seesaw-0') && occupants.has('seesaw-1');
+    const seesawPhase = seesawBoth ? Math.sin(t * 2.4) : 0;
+    if (this.seesawImg) this.seesawImg.setRotation(seesawPhase * 0.14);
+    for (const [id, a] of occupants) {
+      const st = a.seat!;
+      if (st.kind === 'swing') {
+        const level = this.ctx.store.swings[id] ?? 0;
+        const amp = 0.18 + level * 0.13;
+        const ang = Math.sin(t * 2.6 + (id.endsWith('1') ? 1.3 : 0)) * amp;
+        const L = 26;
+        a.rideX = Math.sin(ang) * L * 0.6;
+        a.rideY = -(1 - Math.cos(ang)) * L * 0.5 + Math.sin(ang) * 4;
+        a.rideRot = ang * 0.5;
+      } else if (st.kind === 'seesaw') {
+        a.rideX = 0;
+        a.rideY = (id.endsWith('0') ? -1 : 1) * seesawPhase * 5;
+        a.rideRot = 0;
+      } else if (st.kind === 'spring') {
+        a.rideY = Math.sin(t * 6) * 1.5;
+        a.rideRot = Math.sin(t * 3) * 0.12;
+      } else {
+        a.rideX = a.rideY = a.rideRot = 0;
+      }
+    }
+  }
+
+  private dancePuff(a: Avatar) {
+    a.emit('sparkle', 3);
+  }
+
+  /** 상호작용 연출 */
+  private playFx(ev: FxEvent) {
+    const from = this.avatars.get(ev.from);
+    const to = ev.to !== undefined ? this.avatars.get(ev.to) : undefined;
+    const bubble = (id: number, text: string) => this.ctx.overlay.bubble(id, text, 1400);
+    if (ev.kind === 'slide' && from) {
+      const sl = WORLD.slide;
+      const k = this.textures.get(`char-v2-${from.info.look}`) ? 0 : 0;
+      void k;
+      from.runScript(SLIDE_MS, (t) => {
+        if (t < 0.28) {
+          // 계단 올라가기
+          const u = t / 0.28;
+          return { x: sl.enter.x + (sl.top.x - sl.enter.x) * u, y: sl.enter.y + (sl.top.y - sl.enter.y) * u, frame: Math.floor(u * 8) % 2 ? 'u2' : 'u4' };
+        }
+        if (t < 0.85) {
+          const u = (t - 0.28) / 0.57;
+          const e = u * u;
+          return { x: sl.top.x + (sl.bottom.x - sl.top.x) * e, y: sl.top.y + (sl.bottom.y - sl.top.y) * e - 6, frame: 'q1' };
+        }
+        const u = (t - 0.85) / 0.15;
+        return { x: sl.bottom.x + (sl.exit.x - sl.bottom.x) * u, y: sl.bottom.y + (sl.exit.y - sl.bottom.y) * u - Math.sin(u * Math.PI) * 6, frame: 'p3' };
+      });
+      this.time.delayedCall(SLIDE_MS * 0.86, () => bubble(ev.from, '슝~!'));
+      return;
+    }
+    if (ev.kind === 'launch' && to) {
+      // 퐁! 그네에서 튕겨 나옴
+      const sx = ev.x ?? to.x;
+      const sy = ev.y ?? to.y;
+      const ex = to.x;
+      const ey = to.y;
+      to.runScript(700, (t) => ({ x: sx + (ex - sx) * t, y: sy + (ey - sy) * t - Math.sin(t * Math.PI) * 34, frame: 'p4' }));
+      bubble(ev.to!, '퐁!');
+      this.time.delayedCall(720, () => {
+        to.playPoseAnim('bump');
+        to.emit('star', 4);
+        this.cameras.main.shake(this.ctx.mode === 'player' && to.isSelf ? 120 : 0, 0.004);
+        bubble(ev.to!, '아야야~');
+      });
+      return;
+    }
+    if (!from || !to) return;
+    const fx = from.displayX;
+    const fy = from.displayY - 12;
+    const tx = to.displayX;
+    const ty = to.displayY - 12;
+    const fly = (key: string, dur: number, arc: number, onHit: () => void, rotate = false) => {
+      const img = this.add.image(fx, fy, key).setDepth(9400);
+      if (key === 'plane' && tx < fx) img.setFlipX(true);
+      const o = { t: 0 };
+      this.tweens.add({
+        targets: o,
+        t: 1,
+        duration: dur,
+        onUpdate: () => {
+          img.setPosition(fx + (tx - fx) * o.t, fy + (ty - fy) * o.t - Math.sin(o.t * Math.PI) * arc);
+          if (rotate) img.setRotation(o.t * 6);
+        },
+        onComplete: () => {
+          img.destroy();
+          onHit();
+        },
+      });
+    };
+    switch (ev.kind) {
+      case 'greet':
+        bubble(ev.from, '안녕~!');
+        this.time.delayedCall(500, () => to.showEmote('heart'));
+        break;
+      case 'heart':
+        for (let i = 0; i < 4; i++) this.time.delayedCall(i * 120, () => fly('heart', 600, 18 + i * 4, () => to.emit('heart', 1)));
+        this.time.delayedCall(700, () => to.showEmote('heart'));
+        break;
+      case 'clap':
+        from.showEmote('clap');
+        this.time.delayedCall(300, () => {
+          to.emit('sparkle', 6);
+          to.emit('star', 2);
+        });
+        break;
+      case 'plane':
+        fly('plane', 900, 10, () => {
+          to.playPoseAnim('surprised');
+          to.showEmote('question');
+          bubble(ev.to!, '편지다!');
+        });
+        break;
+      case 'balloon':
+        fly('balloon', 650, 26, () => {
+          to.emit('drop', 10);
+          to.playPoseAnim('surprised');
+          to.showEmote('panic');
+          bubble(ev.to!, '앗 차가워!');
+        }, true);
+        break;
+      case 'hammer': {
+        const h = this.add.image(tx, ty - 22, 'hammer').setDepth(9450).setOrigin(0.5, 1).setRotation(-1);
+        this.tweens.add({
+          targets: h,
+          rotation: 0.4,
+          duration: 160,
+          ease: 'Quad.In',
+          onComplete: () => {
+            to.squash(0.45, 240);
+            const imp = this.add.image(tx, ty - 8, 'impact').setDepth(9460);
+            this.tweens.add({ targets: [imp, h], alpha: 0, duration: 400, delay: 200, onComplete: () => (imp.destroy(), h.destroy()) });
+            bubble(ev.to!, '뿅!');
+          },
+        });
+        break;
+      }
+    }
+  }
+
+  /** 자유 카메라 조작 (관전 화면) */
+  panBy(dx: number, dy: number) {
+    const cam = this.cameras.main;
+    if (this.screenCamMode !== 'free') {
+      this.screenCamMode = 'free';
+      this.freeCam = { x: cam.midPoint.x, y: cam.midPoint.y, z: cam.zoom };
+    }
+    this.freeCam.x = Phaser.Math.Clamp(this.freeCam.x + dx / cam.zoom, 0, WORLD_W);
+    this.freeCam.y = Phaser.Math.Clamp(this.freeCam.y + dy / cam.zoom, 0, WORLD_H);
+  }
+  zoomBy(f: number) {
+    const cam = this.cameras.main;
+    if (this.screenCamMode !== 'free') {
+      this.screenCamMode = 'free';
+      this.freeCam = { x: cam.midPoint.x, y: cam.midPoint.y, z: cam.zoom };
+    }
+    this.freeCam.z = Phaser.Math.Clamp(this.freeCam.z * f, this.fitZoom() * 0.8, 6);
+  }
+  resetFree() {
+    this.freeCam.z = 0;
   }
 
   /** 내 캐릭터의 음식 정보 (메뉴 표시용) */

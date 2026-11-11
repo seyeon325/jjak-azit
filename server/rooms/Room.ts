@@ -72,7 +72,23 @@ export class Room {
       roomId: this.id,
       serverTime: Date.now(),
       players: [...this.players.values()].map((p) => ({ ...p.info })),
+      ...this.extraSnapshot(),
     };
+  }
+
+  /** 하위 클래스가 스냅숏에 덧붙일 정보 */
+  protected extraSnapshot(): Omit<RoomSnapshot, 'roomId' | 'serverTime' | 'players'> {
+    return { swings: {}, display: { hideNames: false, hideTeams: false, hideBubbles: false, photo: false }, teamNames: [] };
+  }
+
+  /** 좌석·미끄럼틀 등으로 지금 움직일 수 없는지 */
+  protected locked(_id: number): boolean {
+    return false;
+  }
+
+  /** 모든 참가자 (내부용) */
+  protected all() {
+    return [...this.players.values()].map((r) => r.info);
   }
 
   addPlayer(info: PlayerInfo) {
@@ -119,6 +135,7 @@ export class Room {
 
     const [x, y, dir, moving] = input;
     const info = rec.info;
+    if (info.seat || this.locked(id)) return null; // 앉아 있거나 놀이기구 이용 중이면 이동 무시
     const dt = Math.min(1, Math.max(0, (now - rec.lastMoveAt) / 1000));
     const allowed = MOVE_SPEED * dt * 1.6 + 14;
     const dist = Math.hypot(x - info.x, y - info.y);

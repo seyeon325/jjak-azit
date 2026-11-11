@@ -1,4 +1,6 @@
-import { COLOR_COUNT, LOOK_COUNT, NICK_MAX, NICK_MIN } from '../shared/constants';
+import { COLOR_COUNT, GRADE_TEXT_MAX, LOOK_COUNT, NICK_MAX, NICK_MIN } from '../shared/constants';
+import { WORLD } from '../shared/map';
+import { TEAMS } from '../shared/social';
 import { FOOD_IDS, type ActRequest, type Dir, type FoodId, type Grade, type MoveInput, type Profile } from '../shared/protocol';
 
 /** 보이지 않는 제어문자·방향 제어문자 (줄바꿈 \n 은 허용) */
@@ -27,7 +29,10 @@ export function sanitizeProfile(raw: unknown): Profile | { error: string } {
   const grade = (Number.isInteger(g) && g >= 0 && g <= 4 ? g : 0) as Grade;
   const c = Number(p.color);
   const color = Number.isInteger(c) && c >= 0 && c < COLOR_COUNT ? c : 0;
-  return { nickname, role, grade, look, color };
+  const gradeText = grade === 0 ? sanitizeText(p.gradeText, GRADE_TEXT_MAX) ?? '' : '';
+  const t = Number(p.team);
+  const team = TEAMS.some((x) => x.id === t) ? t : -1;
+  return { nickname, role, grade, gradeText, team, look, color };
 }
 
 export function parseMove(raw: unknown): MoveInput | null {
@@ -44,6 +49,10 @@ export function parseAct(raw: unknown): ActRequest | null {
   if (r.t === 'eat') return { t: 'eat' };
   if (r.t === 'bath') return { t: 'bath', on: !!r.on };
   if (r.t === 'food' && FOOD_IDS.includes(r.food as FoodId)) return { t: 'food', food: r.food as FoodId };
+  if (r.t === 'stand') return { t: 'stand' };
+  if (r.t === 'slide') return { t: 'slide' };
+  if ((r.t === 'sit' || r.t === 'push') && typeof r.seat === 'string' && WORLD.seats.some((x) => x.id === r.seat))
+    return { t: r.t, seat: r.seat };
   return null;
 }
 
@@ -57,6 +66,15 @@ export function sanitizeNote(raw: unknown, max: number): string | null {
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+  const chars = Array.from(cleaned);
+  if (!chars.length) return null;
+  return chars.slice(0, max).join('');
+}
+
+/** 한 줄 텍스트 (채팅·댓글·이름 등): 줄바꿈·제어문자 제거, 길이 제한 */
+export function sanitizeText(raw: unknown, max: number): string | null {
+  if (typeof raw !== 'string') return null;
+  const cleaned = raw.normalize('NFC').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim();
   const chars = Array.from(cleaned);
   if (!chars.length) return null;
   return chars.slice(0, max).join('');

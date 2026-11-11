@@ -18,13 +18,16 @@ export const ORIGIN_Y = 24 / FRAME_H;
 /** 머리 꼭대기~발까지 대략 높이 (이름표 위치 계산용) */
 export const HEAD_TOP = 19;
 export const SHEET_COLS = 6;
-export const DIR_ROWS = ['d', 'u', 's', 'e'] as const;
+export const DIR_ROWS = ['d', 'u', 's', 'e', 'p', 'q'] as const;
+/** 포즈 행 p: [앉기(정면), 손흔들기A, 손흔들기B, 브이, 놀람, 엉덩방아] / q: [앉기(뒤), 앉기(옆)] */
+export const POSE_FRAMES = { sit: 'p0', waveA: 'p1', waveB: 'p2', v: 'p3', surprised: 'p4', bump: 'p5', sitBack: 'q0', sitSide: 'q1' } as const;
 export const EXPR_FRAMES = { happy: 0, hot: 1, relax: 2, chew: 3, chew2: 4, relax2: 5 } as const;
 
 type HairStyle = 'short' | 'bob' | 'long' | 'messy' | 'slick';
 type TopKind = 'tee' | 'hoodie' | 'pajama' | 'jacket' | 'cardigan' | 'onesie' | 'overalls' | 'raincoat';
 type Hat = 'catBeanie' | 'frog' | 'crown' | 'mushroom' | 'bear' | 'bunny' | 'beret' | 'sleepcap';
-type Expr = 'normal' | 'blink' | 'happy' | 'hot' | 'relax' | 'chew' | 'chew2';
+type Expr = 'normal' | 'blink' | 'happy' | 'hot' | 'relax' | 'chew' | 'chew2' | 'wow';
+type Pose = 'none' | 'sit' | 'waveA' | 'waveB' | 'v' | 'surprised';
 
 export interface LookDef {
   name: string;
@@ -241,9 +244,12 @@ const MOUTH = '#8a3a4a';
 
 type DirKey = 'd' | 'u' | 's';
 
-function paintFrame(pc: PixelCanvas, L: LookDef, dir: DirKey, frame: number, expr: Expr) {
-  const walk = frame >= 2 ? frame - 2 : -1;
-  const bob = walk === 0 || walk === 2 ? 1 : 0;
+function paintFrame(pc: PixelCanvas, L: LookDef, dir: DirKey, frame: number, expr: Expr, pose: Pose = 'none') {
+  const walk = pose !== 'none' ? -1 : frame >= 2 ? frame - 2 : -1;
+  const sit = pose === 'sit';
+  const bob = (walk === 0 || walk === 2 ? 1 : 0) + (sit ? 2 : 0);
+  const armUpR = pose === 'waveA' || pose === 'waveB' || pose === 'v' || pose === 'surprised';
+  const armUpL = pose === 'surprised';
   const skin = SKINS[L.skin];
   const hair = L.hair;
   const hairDark = mix(hair, '#2a1f30', 0.28);
@@ -282,7 +288,16 @@ function paintFrame(pc: PixelCanvas, L: LookDef, dir: DirKey, frame: number, exp
   }
 
   // ---------------------------------------------------------- 다리
-  if (dir === 's') {
+  if (sit) {
+    if (dir === 's') {
+      pc.rect(2, LY + 1, 7, 1, pants);
+      pc.rect(1, LY + 1, 2, 2, shoe);
+    } else {
+      pc.rect(5, LY + 1, 6, 1, dir === 'u' ? pantsDark : pants);
+      pc.rect(4, LY + 2, 3, 1, shoe);
+      pc.rect(9, LY + 2, 3, 1, shoe);
+    }
+  } else if (dir === 's') {
     const stride = walk === 0 || walk === 2;
     const back = walk === 2 ? pants : pantsDark;
     const front = walk === 2 ? pantsDark : pants;
@@ -444,10 +459,35 @@ function paintFrame(pc: PixelCanvas, L: LookDef, dir: DirKey, frame: number, exp
   } else {
     const aL = walk === 0 ? -1 : walk === 2 ? 1 : 0;
     const aR = -aL;
-    pc.rect(3, BY + 1 + aL, 1, 2, topDark);
-    pc.set(3, BY + 3 + aL, hand);
-    pc.rect(12, BY + 1 + aR, 1, 2, topDark);
-    pc.set(12, BY + 3 + aR, hand);
+    if (armUpL) {
+      pc.rect(3, BY - 2, 1, 3, topDark);
+      pc.set(2, BY - 3, hand);
+      pc.set(3, BY - 3, hand);
+    } else {
+      pc.rect(3, BY + 1 + aL, 1, 2, topDark);
+      pc.set(3, BY + 3 + aL, hand);
+    }
+    if (armUpR) {
+      if (pose === 'waveB') {
+        pc.rect(12, BY - 1, 1, 2, topDark);
+        pc.set(13, BY - 2, topDark);
+        pc.set(13, BY - 3, hand);
+        pc.set(14, BY - 4, hand);
+      } else {
+        pc.rect(12, BY - 2, 1, 3, topDark);
+        pc.set(12, BY - 3, hand);
+        pc.set(13, BY - 3, hand);
+        if (pose === 'v') {
+          pc.set(12, BY - 5, hand);
+          pc.set(12, BY - 4, hand);
+          pc.set(14, BY - 5, hand);
+          pc.set(13, BY - 4, hand);
+        }
+      }
+    } else {
+      pc.rect(12, BY + 1 + aR, 1, 2, topDark);
+      pc.set(12, BY + 3 + aR, hand);
+    }
   }
 
   // ---------------------------------------------------------- 머리
@@ -603,6 +643,13 @@ function paintFrame(pc: PixelCanvas, L: LookDef, dir: DirKey, frame: number, exp
           H(eR, eyeR, EYE);
           H(eR + 1, eyeR + 1, EYE);
           break;
+        case 'wow':
+          for (const cx of [eL, eR]) {
+            H(cx, eyeR - 1, EYE);
+            H(cx, eyeR, EYE);
+            H(cx, eyeR + 1, EYE);
+          }
+          break;
         case 'relax':
           for (const cx of [eL, eR]) {
             H(cx - 1, eyeR, EYE);
@@ -624,7 +671,12 @@ function paintFrame(pc: PixelCanvas, L: LookDef, dir: DirKey, frame: number, exp
     }
     // 입
     const my = isBear ? 7 : 8;
-    if (expr === 'happy' || expr === 'hot' || expr === 'chew') {
+    if (expr === 'wow') {
+      H(7, my, MOUTH);
+      H(8, my, MOUTH);
+      H(7, my + 1 > 9 ? my : my - 1, MOUTH);
+      H(8, my + 1 > 9 ? my : my - 1, MOUTH);
+    } else if (expr === 'happy' || expr === 'hot' || expr === 'chew') {
       H(7, my, MOUTH);
       H(8, my, MOUTH);
       if (expr !== 'happy') H(7, my - 1, MOUTH);
@@ -880,9 +932,9 @@ function paintFrame(pc: PixelCanvas, L: LookDef, dir: DirKey, frame: number, exp
   }
 }
 
-function makeFrame(L: LookDef, dir: DirKey, frame: number, expr: Expr): PixelCanvas {
+function makeFrame(L: LookDef, dir: DirKey, frame: number, expr: Expr, pose: Pose = 'none'): PixelCanvas {
   const pc = new PixelCanvas(FRAME_W, FRAME_H);
-  paintFrame(pc, L, dir, frame, expr);
+  paintFrame(pc, L, dir, frame, expr, pose);
   pc.outline(OUTLINE);
   return pc;
 }
@@ -906,6 +958,17 @@ export function buildCharacterSheet(lookIdx: number): HTMLCanvasElement {
   });
   const exprs: Expr[] = ['happy', 'hot', 'relax', 'chew', 'chew2', 'relax'];
   exprs.forEach((e, f) => sheet.blit(makeFrame(L, 'd', f === 5 ? 3 : 0, e), f * FRAME_W, 3 * FRAME_H));
+  const poses: [Pose, Expr][] = [
+    ['sit', 'normal'],
+    ['waveA', 'happy'],
+    ['waveB', 'happy'],
+    ['v', 'happy'],
+    ['surprised', 'wow'],
+    ['sit', 'hot'],
+  ];
+  poses.forEach(([p, e], f) => sheet.blit(makeFrame(L, 'd', 0, e, p), f * FRAME_W, 4 * FRAME_H));
+  sheet.blit(makeFrame(L, 'u', 0, 'normal', 'sit'), 0, 5 * FRAME_H);
+  sheet.blit(makeFrame(L, 's', 0, 'normal', 'sit'), FRAME_W, 5 * FRAME_H);
   const canvas = sheet.flush();
   sheetCache.set(key, canvas);
   return canvas;
