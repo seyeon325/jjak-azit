@@ -52,7 +52,7 @@ export const EMOTE_LABEL: Record<EmoteId, string> = {
 };
 
 export const POSES = ['wave', 'v', 'jump', 'spin', 'sit', 'dance', 'surprised'] as const;
-export type PoseId = (typeof POSES)[number] | 'bump';
+export type PoseId = (typeof POSES)[number] | 'bump' | 'push';
 export const POSE_LABEL: Record<(typeof POSES)[number], string> = {
   wave: '손 흔들기',
   v: '브이',

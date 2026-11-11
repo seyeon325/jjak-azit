@@ -14,6 +14,7 @@ import {
   buildProp,
   buildShadow,
   buildSparkle,
+  buildSwingSeat,
   buildSwirlSheet,
   propTextureKey,
 } from './art/props';
@@ -68,6 +69,7 @@ export function registerStaticTextures(scene: Phaser.Scene) {
   t.addCanvas('drop', buildDrop());
   t.addCanvas('hammer', buildHammer());
   t.addCanvas('impact', buildImpact());
+  t.addCanvas('swingSeat', buildSwingSeat());
 
   const anims = scene.anims;
   anims.create({ key: 'flame', frames: anims.generateFrameNumbers('flame', { start: 0, end: 3 }), frameRate: 9, repeat: -1 });

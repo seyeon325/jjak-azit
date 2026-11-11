@@ -20,14 +20,14 @@ export const HEAD_TOP = 19;
 export const SHEET_COLS = 6;
 export const DIR_ROWS = ['d', 'u', 's', 'e', 'p', 'q'] as const;
 /** 포즈 행 p: [앉기(정면), 손흔들기A, 손흔들기B, 브이, 놀람, 엉덩방아] / q: [앉기(뒤), 앉기(옆)] */
-export const POSE_FRAMES = { sit: 'p0', waveA: 'p1', waveB: 'p2', v: 'p3', surprised: 'p4', bump: 'p5', sitBack: 'q0', sitSide: 'q1' } as const;
+export const POSE_FRAMES = { sit: 'p0', waveA: 'p1', waveB: 'p2', v: 'p3', surprised: 'p4', bump: 'p5', sitBack: 'q0', sitSide: 'q1', push: 'q2', pushB: 'q3' } as const;
 export const EXPR_FRAMES = { happy: 0, hot: 1, relax: 2, chew: 3, chew2: 4, relax2: 5 } as const;
 
 type HairStyle = 'short' | 'bob' | 'long' | 'messy' | 'slick';
 type TopKind = 'tee' | 'hoodie' | 'pajama' | 'jacket' | 'cardigan' | 'onesie' | 'overalls' | 'raincoat';
 type Hat = 'catBeanie' | 'frog' | 'crown' | 'mushroom' | 'bear' | 'bunny' | 'beret' | 'sleepcap';
 type Expr = 'normal' | 'blink' | 'happy' | 'hot' | 'relax' | 'chew' | 'chew2' | 'wow';
-type Pose = 'none' | 'sit' | 'waveA' | 'waveB' | 'v' | 'surprised';
+type Pose = 'none' | 'sit' | 'waveA' | 'waveB' | 'v' | 'surprised' | 'push';
 
 export interface LookDef {
   name: string;
@@ -459,7 +459,13 @@ function paintFrame(pc: PixelCanvas, L: LookDef, dir: DirKey, frame: number, exp
   } else {
     const aL = walk === 0 ? -1 : walk === 2 ? 1 : 0;
     const aR = -aL;
-    if (armUpL) {
+    if (pose === 'push') {
+      // 두 팔을 앞으로 쭉 (그네 밀기)
+      pc.rect(4, BY + 1, 1, 2, topDark);
+      pc.rect(11, BY + 1, 1, 2, topDark);
+      pc.rect(5, BY + 3, 2, 1, hand);
+      pc.rect(9, BY + 3, 2, 1, hand);
+    } else if (armUpL) {
       pc.rect(3, BY - 2, 1, 3, topDark);
       pc.set(2, BY - 3, hand);
       pc.set(3, BY - 3, hand);
@@ -467,7 +473,9 @@ function paintFrame(pc: PixelCanvas, L: LookDef, dir: DirKey, frame: number, exp
       pc.rect(3, BY + 1 + aL, 1, 2, topDark);
       pc.set(3, BY + 3 + aL, hand);
     }
-    if (armUpR) {
+    if (pose === 'push') {
+      /* 위에서 그림 */
+    } else if (armUpR) {
       if (pose === 'waveB') {
         pc.rect(12, BY - 1, 1, 2, topDark);
         pc.set(13, BY - 2, topDark);
@@ -969,6 +977,8 @@ export function buildCharacterSheet(lookIdx: number): HTMLCanvasElement {
   poses.forEach(([p, e], f) => sheet.blit(makeFrame(L, 'd', 0, e, p), f * FRAME_W, 4 * FRAME_H));
   sheet.blit(makeFrame(L, 'u', 0, 'normal', 'sit'), 0, 5 * FRAME_H);
   sheet.blit(makeFrame(L, 's', 0, 'normal', 'sit'), FRAME_W, 5 * FRAME_H);
+  sheet.blit(makeFrame(L, 'd', 0, 'happy', 'push'), 2 * FRAME_W, 5 * FRAME_H);
+  sheet.blit(makeFrame(L, 'd', 1, 'happy', 'push'), 3 * FRAME_W, 5 * FRAME_H);
   const canvas = sheet.flush();
   sheetCache.set(key, canvas);
   return canvas;

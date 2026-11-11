@@ -484,7 +484,9 @@ function buildMap(): WorldMap {
       const north = p.y < fy - 10;
       const south = p.y > fy + 10;
       const west = !north && !south && p.x < fx;
-      const dir = north ? 0 : south ? 1 : west ? 3 : 2;
+      // 동·서쪽 통나무는 가로로 누워 있으므로 정면(카메라)을 보고 앉음
+      void west;
+      const dir = north ? 0 : south ? 1 : 0;
       seats.push({ id: `${g}-0`, kind: 'log', group: g, x: p.x - 7, y: p.y + 1, dir });
       seats.push({ id: `${g}-1`, kind: 'log', group: g, x: p.x + 7, y: p.y + 1, dir });
     }

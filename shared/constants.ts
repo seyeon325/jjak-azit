@@ -46,7 +46,7 @@ export const GRADE_TEXT_MAX = 6;
 export const CAMPFIRE_R = 72;
 /** 좌석·놀이기구에 앉을 수 있는 거리 (px) */
 export const SEAT_RANGE = 30;
-/** 미끄럼틀 타는 시간 */
-export const SLIDE_MS = 1700;
+/** 미끄럼틀 타는 시간 (계단 오르기 + 대기 + 미끄러지기 + 착지) */
+export const SLIDE_MS = 2650;
 /** 그네를 이만큼 밀면 '퐁!' */
 export const SWING_LAUNCH = 5;

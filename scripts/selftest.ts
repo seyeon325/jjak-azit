@@ -256,13 +256,15 @@ check(!(await call(d.s, 'act', { t: 'push', seat: 'swing-0' })).ok, '탑승자�
 e.s.emit('setPref', { noPrank: false });
 await sleep(150);
 const launched = waitFor<FxEvent>((dn) => observer.s.on('fx', (f) => f.kind === 'launch' && f.to === e.id && dn(f)), 8000);
-const levels: number[] = [];
-observer.s.on('swing', (sid, lv) => sid === 'swing-0' && levels.push(lv));
+const amps: number[] = [];
+observer.s.on('swing', (sid, st) => sid === 'swing-0' && amps.push(st.amp));
 for (let i = 0; i < 5; i++) {
   await call(d.s, 'act', { t: 'push', seat: 'swing-0' });
   await sleep(700);
 }
-check(levels.includes(3), '밀 때마다 그네가 더 크게 흔들림 (단계 동기화)');
+check(amps.length >= 3 && amps[2] > amps[1] && amps[1] > amps[0], '밀 때마다 그네 진폭이 커짐 (진자 상태 동기화)');
+const pushedBehind = d.pos.y < seat('swing-0').y;
+check(pushedBehind, '밀어주는 사람은 그네 뒤쪽 자리로 이동해 밂');
 const lf = await launched;
 await sleep(150);
 check(!!lf && WORLD.collision.canStand(e.pos.x, e.pos.y), "5번 밀면 '퐁!' 튀어나와 땅에 착지 (피해 없음)");
@@ -272,7 +274,7 @@ const sl = WORLD.slide;
 check(await walk(d, sl.enter.x, sl.enter.y), '미끄럼틀 계단 앞으로');
 const slideFx = waitFor<boolean>((dn) => observer.s.on('fx', (f) => f.kind === 'slide' && f.from === d.id && dn(true)));
 check((await call(d.s, 'act', { t: 'slide' })).ok && !!(await slideFx), '미끄럼틀 타기 → 모두에게 연출');
-await sleep(1900);
+await sleep(2900);
 check(Math.hypot(d.pos.x - sl.exit.x, d.pos.y - sl.exit.y) < 2, '다 내려오면 출구에 착지');
 
 const ss0 = standNear('seesaw-0');

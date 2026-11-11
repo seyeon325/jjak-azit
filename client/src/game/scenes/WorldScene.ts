@@ -4,8 +4,9 @@
  * mode 'player' = 참가자 화면 / 'screen' = 운영자 관전 화면
  */
 import Phaser from 'phaser';
-import { BATH_SPEED, CAMPFIRE_R, MOVE_SPEED, SEAT_RANGE, SEND_HZ, SLIDE_MS, WORLD_H, WORLD_W } from '../../../../shared/constants';
+import { BATH_SPEED, CAMPFIRE_R, MOVE_SPEED, SEAT_RANGE, SEND_HZ, WORLD_H, WORLD_W } from '../../../../shared/constants';
 import type { FxEvent } from '../../../../shared/protocol';
+import { SLIDE_TIMES, SWING, swingAngle, swingSeatOffset } from '../../../../shared/playground';
 import { foodDef } from '../../../../shared/foods';
 import { nearSpot, nearSpringEdge, T, WORLD, zoneAt, type TileType, type Zone } from '../../../../shared/map';
 import type { Dir, FoodId, PlayerInfo } from '../../../../shared/protocol';
@@ -71,6 +72,10 @@ export class WorldScene extends Phaser.Scene {
   trackId: number | null = null;
   private freeCam = { x: WORLD_W / 2, y: WORLD_H / 2, z: 0 };
   private seesawImg: Phaser.GameObjects.Image | null = null;
+  private springImg: Phaser.GameObjects.Image | null = null;
+  private springAngle = 0;
+  private swingRigs: { id: string; x: number; restY: number; pivotY: number; base: number; seat: Phaser.GameObjects.Image; theta: number }[] = [];
+  private swingGfx: Phaser.GameObjects.Graphics | null = null;
   private showTeams = true;
 
   constructor() {
@@ -115,6 +120,14 @@ export class WorldScene extends Phaser.Scene {
         if (patch.seat !== undefined) a.setSeat(patch.seat);
         if (patch.team !== undefined) a.setTeam(patch.team);
         if (patch.x !== undefined && patch.y !== undefined) {
+          const fromX = a.x;
+          const fromY = a.y;
+          const short = patch.seat === undefined && patch.bath === undefined && Math.hypot(patch.x - fromX, patch.y - fromY) < 70;
+          if (short && !a.scripted) {
+            const tx = patch.x;
+            const ty = patch.y;
+            a.runScript(180, (t) => ({ x: fromX + (tx - fromX) * t, y: fromY + (ty - fromY) * t, frame: ty < fromY ? 'u3' : 'd3' }));
+          }
           a.setPose(patch.x, patch.y, a.dir, false);
           if (a === this.self) this.lastSent.x = NaN;
         }
@@ -171,7 +184,16 @@ export class WorldScene extends Phaser.Scene {
         obj.on('pointerup', () => this.ctx.onBoardTap?.());
       }
       if (p.kind === 'foodtruck') this.addTruckLights(p.x, p.y);
-      if (p.kind === 'seesaw') this.seesawImg = obj as Phaser.GameObjects.Image;
+      if (p.kind === 'seesaw') {
+        // 시소는 가운데 받침(회전축)을 기준으로 기울어짐
+        this.seesawImg = obj as Phaser.GameObjects.Image;
+        this.seesawImg.setOrigin(0.5, 10 / 22).setY(Math.round(p.y) - 12);
+      }
+      if (p.kind === 'spring') {
+        // 오리 스프링은 바닥을 축으로 좌우로 흔들림
+        this.springImg = obj as Phaser.GameObjects.Image;
+      }
+      if (p.kind === 'swing') this.buildSwingRig(p.x, p.y);
     }
     this.addSpringFx();
     this.addPetals();
@@ -626,33 +648,96 @@ export class WorldScene extends Phaser.Scene {
     };
   }
 
-  /** 그네·시소·스프링 움직임 (모든 화면에서 같은 시간 기준) */
+  /** 그네 줄·좌석 (진자) */
+  private buildSwingRig(px: number, py: number) {
+    const pivotY = py - 46 + 6;
+    for (const st of WORLD.seats.filter((x) => x.kind === 'swing')) {
+      const restY = pivotY + SWING.rope;
+      const seat = this.add.image(st.x + 0.5, restY, 'swingSeat').setOrigin(0.5, 0.5).setDepth(py + 1.5);
+      this.swingRigs.push({ id: st.id, x: st.x + 0.5, restY, pivotY, base: py, seat, theta: 0 });
+    }
+    this.swingGfx = this.add.graphics().setDepth(py + 1);
+  }
+
+  /** 그네·시소·스프링 움직임 — 서버 시각 기준이라 모든 화면에서 같은 움직임 */
   private updateRides() {
-    const t = Date.now() / 1000;
+    const now = this.ctx.store.serverNow();
+    const t = now / 1000;
     const occupants = new Map<string, Avatar>();
     for (const a of this.avatars.values()) if (a.seat) occupants.set(a.seat.id, a);
-    const seesawBoth = occupants.has('seesaw-0') && occupants.has('seesaw-1');
-    const seesawPhase = seesawBoth ? Math.sin(t * 2.4) : 0;
-    if (this.seesawImg) this.seesawImg.setRotation(seesawPhase * 0.14);
-    for (const [id, a] of occupants) {
-      const st = a.seat!;
-      if (st.kind === 'swing') {
-        const level = this.ctx.store.swings[id] ?? 0;
-        const amp = 0.18 + level * 0.13;
-        const ang = Math.sin(t * 2.6 + (id.endsWith('1') ? 1.3 : 0)) * amp;
-        const L = 26;
-        a.rideX = Math.sin(ang) * L * 0.6;
-        a.rideY = -(1 - Math.cos(ang)) * L * 0.5 + Math.sin(ang) * 4;
-        a.rideRot = ang * 0.5;
-      } else if (st.kind === 'seesaw') {
+
+    // ---- 그네: 줄과 좌석이 상단 막대를 축으로 흔들리고, 탑승자는 좌석에 붙어 함께 움직임
+    const g = this.swingGfx;
+    g?.clear();
+    for (const rig of this.swingRigs) {
+      const rider = occupants.get(rig.id);
+      const target = swingAngle(this.ctx.store.swings[rig.id], now, !!rider);
+      // 밀기 순간의 위상 변화가 튀지 않도록 아주 짧게 따라감
+      rig.theta += (target - rig.theta) * 0.35;
+      const off = swingSeatOffset(rig.theta);
+      const sy = rig.restY + off.dy;
+      rig.seat.setPosition(rig.x, sy).setScale(off.scale, off.scale * (1 - 0.25 * Math.abs(Math.sin(rig.theta))));
+      if (g) {
+        const half = 3.5 * off.scale;
+        g.lineStyle(1, 0x55526d, 1);
+        g.lineBetween(rig.x - 3.5, rig.pivotY, rig.x - half, sy - 1);
+        g.lineBetween(rig.x + 3.5, rig.pivotY, rig.x + half, sy - 1);
+        g.lineStyle(1, 0xb6bbd0, 1);
+        g.lineBetween(rig.x - 2.5, rig.pivotY, rig.x - half + 1, sy - 1);
+        g.lineBetween(rig.x + 4.5, rig.pivotY, rig.x + half + 1, sy - 1);
+      }
+      if (rider) {
+        rider.rideX = rig.x - rider.x;
+        rider.rideY = off.dy;
+        rider.rideScale = off.scale;
+        rider.rideRot = rig.theta * 0.1;
+        rider.rideDepth = rig.base + 3;
+      }
+    }
+
+    // ---- 시소: 받침을 축으로 기울고, 양 끝에 앉은 사람이 판과 함께 오르내림
+    const s0 = occupants.get('seesaw-0');
+    const s1 = occupants.get('seesaw-1');
+    let rot = 0;
+    if (s0 && s1) rot = Math.sin(t * 2.2) * 0.2;
+    else if (s0) rot = -0.16; // 혼자 앉으면 앉은 쪽이 내려감 (대기)
+    else if (s1) rot = 0.16;
+    if (this.seesawImg) {
+      const cur = this.seesawImg.rotation;
+      this.seesawImg.setRotation(cur + (rot - cur) * 0.2);
+      const r = this.seesawImg.rotation;
+      for (const [a, side] of [
+        [s0, -1],
+        [s1, 1],
+      ] as [Avatar | undefined, number][]) {
+        if (!a) continue;
         a.rideX = 0;
-        a.rideY = (id.endsWith('0') ? -1 : 1) * seesawPhase * 5;
-        a.rideRot = 0;
-      } else if (st.kind === 'spring') {
-        a.rideY = Math.sin(t * 6) * 1.5;
-        a.rideRot = Math.sin(t * 3) * 0.12;
-      } else {
+        a.rideY = side * 18 * Math.sin(r);
+        a.rideRot = r * 0.6;
+        a.rideDepth = this.seesawImg.depth + 2;
+      }
+    }
+
+    // ---- 스프링 오리: 바닥을 축으로 좌우로 흔들리고, 탑승자도 같은 축으로 함께 기울어짐
+    const sp = occupants.get('spring-0');
+    const targetAng = sp ? Math.sin(t * 4.2) * 0.32 + Math.sin(t * 9) * 0.04 : 0;
+    this.springAngle += (targetAng - this.springAngle) * 0.25;
+    if (this.springImg) {
+      this.springImg.setRotation(this.springAngle);
+      if (sp) {
+        const h = 13; // 바닥 ~ 오리 등 높이
+        sp.rideX = Math.sin(this.springAngle) * h;
+        sp.rideY = h - Math.cos(this.springAngle) * h;
+        sp.rideRot = this.springAngle;
+        sp.rideDepth = this.springImg.depth + 2;
+      }
+    }
+
+    for (const [id, a] of occupants) {
+      if (id.startsWith('bench') || id.startsWith('log')) {
         a.rideX = a.rideY = a.rideRot = 0;
+        a.rideScale = 1;
+        a.rideDepth = null;
       }
     }
   }
@@ -668,37 +753,84 @@ export class WorldScene extends Phaser.Scene {
     const bubble = (id: number, text: string) => this.ctx.overlay.bubble(id, text, 1400);
     if (ev.kind === 'slide' && from) {
       const sl = WORLD.slide;
-      const k = this.textures.get(`char-v2-${from.info.look}`) ? 0 : 0;
-      void k;
-      from.runScript(SLIDE_MS, (t) => {
-        if (t < 0.28) {
-          // 계단 올라가기
-          const u = t / 0.28;
-          return { x: sl.enter.x + (sl.top.x - sl.enter.x) * u, y: sl.enter.y + (sl.top.y - sl.enter.y) * u, frame: Math.floor(u * 8) % 2 ? 'u2' : 'u4' };
+      const T = SLIDE_TIMES;
+      const total = T.climb + T.wait + T.slide + T.land;
+      const front = 392 + 3; // 미끄럼틀(받침 y=392)보다 앞에 그려서 구조물을 뚫지 않게
+      const ladderX = 720;
+      const rungs = [392, 386, 380, 374, 368, 362, 356];
+      const top = { x: ladderX - 4, y: 355 };
+      const chuteTop = { x: 709, y: 357 };
+      const chuteEnd = { x: 690, y: 388 };
+      from.runScript(total, (u) => {
+        const ms = u * total;
+        if (ms < T.climb) {
+          // 계단 앞 → 한 칸씩 올라감 (뒷모습)
+          const k = ms / T.climb;
+          if (k < 0.12) {
+            const w = k / 0.12;
+            return { x: sl.enter.x + (ladderX - sl.enter.x) * w, y: sl.enter.y + (rungs[0] - sl.enter.y) * w, frame: 'u3', depth: front };
+          }
+          const steps = rungs.length - 1;
+          const f = ((k - 0.12) / 0.88) * steps;
+          const i = Math.min(steps - 1, Math.floor(f));
+          const w = Math.min(1, (f - i) * 1.6); // 빠르게 한 칸 오르고 잠깐 멈춤
+          return { x: ladderX + (i % 2 ? 1 : -1) * 0.5, y: rungs[i] + (rungs[i + 1] - rungs[i]) * w, frame: i % 2 ? 'u2' : 'u4', depth: front };
         }
-        if (t < 0.85) {
-          const u = (t - 0.28) / 0.57;
-          const e = u * u;
-          return { x: sl.top.x + (sl.bottom.x - sl.top.x) * e, y: sl.top.y + (sl.bottom.y - sl.top.y) * e - 6, frame: 'q1' };
+        if (ms < T.climb + T.wait) {
+          // 꼭대기에서 잠깐: 돌아서서 손 흔들기
+          const k = (ms - T.climb) / T.wait;
+          return { x: ladderX + (top.x - ladderX) * Math.min(1, k * 2), y: top.y, frame: k < 0.5 ? 'd0' : 'p1', depth: front };
         }
-        const u = (t - 0.85) / 0.15;
-        return { x: sl.bottom.x + (sl.exit.x - sl.bottom.x) * u, y: sl.bottom.y + (sl.exit.y - sl.bottom.y) * u - Math.sin(u * Math.PI) * 6, frame: 'p3' };
+        if (ms < T.climb + T.wait + T.slide) {
+          // 경사를 따라 앉은 채로 미끄러짐 (처음엔 천천히, 점점 빠르게)
+          const k = (ms - T.climb - T.wait) / T.slide;
+          const e = k * k * (1.6 - 0.6 * k);
+          return { x: chuteTop.x + (chuteEnd.x - chuteTop.x) * e, y: chuteTop.y + (chuteEnd.y - chuteTop.y) * e + 2, frame: 'q1', rot: -0.35, depth: front };
+        }
+        // 끝에서 톡 튀어 착지
+        const k = (ms - T.climb - T.wait - T.slide) / T.land;
+        return { x: chuteEnd.x + (sl.exit.x - chuteEnd.x) * k, y: chuteEnd.y + (sl.exit.y - chuteEnd.y) * k - Math.sin(k * Math.PI) * 7, frame: k < 0.6 ? 'p4' : 'p3' };
       });
-      this.time.delayedCall(SLIDE_MS * 0.86, () => bubble(ev.from, '슝~!'));
+      this.time.delayedCall(T.climb + T.wait, () => bubble(ev.from, '출발~!'));
+      this.time.delayedCall(T.climb + T.wait + T.slide, () => {
+        bubble(ev.from, '슝~!');
+        from.emit('sparkle', 3);
+      });
       return;
     }
     if (ev.kind === 'launch' && to) {
-      // 퐁! 그네에서 튕겨 나옴
+      // 퐁! 좌석에서 분리 → 회전하며 포물선 → 엉덩방아
       const sx = ev.x ?? to.x;
-      const sy = ev.y ?? to.y;
+      const sy = (ev.y ?? to.y) + 1;
       const ex = to.x;
       const ey = to.y;
-      to.runScript(700, (t) => ({ x: sx + (ex - sx) * t, y: sy + (ey - sy) * t - Math.sin(t * Math.PI) * 34, frame: 'p4' }));
+      const dur = 820;
+      to.runScript(dur, (t) => ({
+        x: sx + (ex - sx) * t,
+        y: sy + (ey - sy) * t - Math.sin(t * Math.PI) * 42,
+        frame: 'p4',
+        rot: t < 0.85 ? t * Math.PI * 2.2 : 0,
+        depth: 9300,
+      }));
       bubble(ev.to!, '퐁!');
-      this.time.delayedCall(720, () => {
+      const puff = this.add.image(sx, sy - 10, 'impact').setDepth(9350).setScale(0.6);
+      this.tweens.add({ targets: puff, scale: 1.2, alpha: 0, duration: 380, onComplete: () => puff.destroy() });
+      for (let i = 0; i < 5; i++) {
+        const star = this.add.image(sx, sy - 8, 'star').setDepth(9350);
+        this.tweens.add({
+          targets: star,
+          x: sx + Math.cos((i / 5) * Math.PI * 2) * 18,
+          y: sy - 8 + Math.sin((i / 5) * Math.PI * 2) * 12,
+          alpha: 0,
+          duration: 520,
+          onComplete: () => star.destroy(),
+        });
+      }
+      this.time.delayedCall(dur + 10, () => {
         to.playPoseAnim('bump');
         to.emit('star', 4);
-        this.cameras.main.shake(this.ctx.mode === 'player' && to.isSelf ? 120 : 0, 0.004);
+        to.squash(0.6, 200);
+        if (this.ctx.mode === 'player' && to.isSelf) this.cameras.main.shake(140, 0.004);
         bubble(ev.to!, '아야야~');
       });
       return;

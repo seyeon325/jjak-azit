@@ -1,4 +1,5 @@
-import { CAMPFIRE_R, EAT_MS, SEAT_RANGE, SLIDE_MS, SWING_LAUNCH } from '../../shared/constants';
+import { CAMPFIRE_R, EAT_MS, SEAT_RANGE, SLIDE_MS } from '../../shared/constants';
+import { SWING, SWING_OMEGA, swingAmp, swingAngle, swingSeatOffset, type SwingState } from '../../shared/playground';
 import { nearSpot, nearSpringEdge, randomSpawn, WORLD, type Seat } from '../../shared/map';
 import type {
   ActRequest,
@@ -47,8 +48,8 @@ const SEAT_BY_ID = new Map(WORLD.seats.map((s) => [s.id, s]));
 export class PlazaRoom extends Room {
   /** 좌석 id → 앉은 참가자 */
   private seats = new Map<string, number>();
-  private swingLevel = new Map<string, number>();
-  private swingTimers = new Map<string, NodeJS.Timeout>();
+  /** 그네 진자 상태 (빈 그네도 서서히 멈출 때까지 유지) */
+  private swingSt = new Map<string, SwingState>();
   private sliding = new Map<number, NodeJS.Timeout>();
   private cooldown = new Map<string, number>();
   private reqs = new Map<number, Req>();
@@ -78,7 +79,7 @@ export class PlazaRoom extends Room {
   }
 
   protected override extraSnapshot(): Omit<RoomSnapshot, 'roomId' | 'serverTime' | 'players'> {
-    return { swings: Object.fromEntries(this.swingLevel), display: this.hooks.display(), teamNames: this.hooks.teamNames() };
+    return { swings: Object.fromEntries(this.swingSt), display: this.hooks.display(), teamNames: this.hooks.teamNames() };
   }
 
   /** 퇴장·연결 끊김 시 좌석·따라가기·요청 정리 */
@@ -170,7 +171,13 @@ export class PlazaRoom extends Room {
         if (this.seats.has(seat.id)) return { ok: false, reason: '누가 이미 앉아 있어요.' };
         this.seats.set(seat.id, id);
         this.patch(id, { seat: seat.id, x: seat.x, y: seat.y, followId: null });
-        if (seat.kind === 'swing') this.setSwing(seat.id, 0);
+        if (seat.kind === 'swing') {
+          // 탑승: 지금 흔들리던 그네를 이어받아 살짝 구르기 시작
+          const now = Date.now();
+          const prev = this.swingSt.get(seat.id);
+          const cur = swingAmp(prev, now, false);
+          this.setSwing(seat.id, { amp: Math.max(cur, SWING.ridingMin), at: now, epoch: prev && cur > 0.02 ? prev.epoch : now });
+        }
         return { ok: true };
       }
       case 'stand': {
@@ -206,33 +213,37 @@ export class PlazaRoom extends Room {
         if (p.seat || p.bath) return { ok: false, reason: '지금은 밀 수 없어요.' };
         if (Math.hypot(p.x - seat.x, p.y - seat.y) > 46) return { ok: false, reason: '그네 가까이 가주세요.' };
         if (!this.cool(id, 'push', 650)) return { ok: false, reason: '천천히 밀어주세요!' };
-        const level = (this.swingLevel.get(seat.id) ?? 0) + 1;
-        this.io.to(this.channel).emit('pose', id, 'wave', Date.now());
-        if (level >= SWING_LAUNCH) {
-          // 퐁! — 탑승자가 튀어나와 엉덩방아
+        const now = Date.now();
+        const st = this.swingSt.get(seat.id);
+        const cur = swingAmp(st, now, true);
+        // 밀어주는 사람은 그네 뒤(위쪽)로 이동해 미는 자세
+        const behind = WORLD.collision.nearest(seat.x, seat.y - 13, 10) ?? { x: p.x, y: p.y };
+        this.patch(id, { x: behind.x, y: behind.y, followId: null });
+        this.io.to(this.channel).emit('pose', id, 'push', now);
+        if (cur >= SWING.launchAt) {
+          // 퐁! — 지금 좌석이 있는 화면 위치에서 포물선으로 튀어나와 앞쪽에 착지
+          const off = swingSeatOffset(swingAngle(st, now, true));
           this.seats.delete(seat.id);
           const land =
-            WORLD.collision.nearest(seat.x + (Math.random() * 24 - 12), seat.y + 44, 40) ??
+            WORLD.collision.nearest(seat.x + (Math.random() * 24 - 12), seat.y + 46, 40) ??
             WORLD.collision.nearest(seat.x, seat.y + 20, 80) ??
             randomSpawn();
           this.patch(riderId, { seat: null, x: land.x, y: land.y });
-          this.io.to(this.channel).emit('fx', { kind: 'launch', from: id, to: riderId, x: seat.x, y: seat.y, at: Date.now() });
-          this.setSwing(seat.id, 0);
-        } else this.setSwing(seat.id, level);
+          this.io.to(this.channel).emit('fx', { kind: 'launch', from: id, to: riderId, x: seat.x, y: seat.y + off.dy, at: now });
+          // 빈 그네는 그대로 흔들리다 서서히 멈춤
+          this.setSwing(seat.id, { amp: Math.min(SWING.max, cur + 0.1), at: now, epoch: st?.epoch ?? now });
+        } else {
+          // 뒤쪽 끝에서 앞으로 밀려 나가도록 위상을 맞추고 진폭 증가
+          this.setSwing(seat.id, { amp: Math.min(SWING.max, cur + SWING.pushBoost), at: now, epoch: now + Math.PI / 2 / SWING_OMEGA });
+        }
         return { ok: true };
       }
     }
   }
 
-  private setSwing(seatId: string, level: number) {
-    this.swingLevel.set(seatId, level);
-    this.io.to(this.channel).emit('swing', seatId, level);
-    clearTimeout(this.swingTimers.get(seatId));
-    if (level > 0)
-      this.swingTimers.set(
-        seatId,
-        setTimeout(() => this.setSwing(seatId, Math.max(0, (this.swingLevel.get(seatId) ?? 1) - 1)), 2600),
-      );
+  private setSwing(seatId: string, st: SwingState) {
+    this.swingSt.set(seatId, st);
+    this.io.to(this.channel).emit('swing', seatId, st);
   }
 
   private leaveSeat(id: number, broadcast: boolean) {
@@ -240,9 +251,9 @@ export class PlazaRoom extends Room {
     if (!p?.seat) return;
     const seat = SEAT_BY_ID.get(p.seat);
     this.seats.delete(p.seat);
-    if (seat?.kind === 'swing') this.setSwing(seat.id, 0);
     const land = seat ? WORLD.collision.nearest(seat.x, seat.y + 12, 80) ?? randomSpawn() : { x: p.x, y: p.y };
-    if (broadcast || true) this.patch(id, { seat: null, x: land.x, y: land.y });
+    void broadcast;
+    this.patch(id, { seat: null, x: land.x, y: land.y });
   }
 
   seatOf(id: number): Seat | null {

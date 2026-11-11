@@ -5,6 +5,7 @@
  */
 import { INTERP_DELAY_MS, TICK_HZ } from '../../../shared/constants';
 import type { EmoteId, PoseId } from '../../../shared/social';
+import type { SwingState } from '../../../shared/playground';
 import type {
   BoardComment,
   BoardNote,
@@ -61,7 +62,7 @@ type StoreEvents = {
   fx: [FxEvent];
   req: [RequestEvent];
   info: [string];
-  swing: [string, number];
+  swing: [string, SwingState];
   fireQ: [string];
   notice: [string];
   display: [DisplaySettings];
@@ -76,7 +77,7 @@ export class WorldStore extends Emitter<StoreEvents> {
   selfId: number | null = null;
   display: DisplaySettings = { hideNames: false, hideTeams: false, hideBubbles: false, photo: false };
   teamNames: string[] = [];
-  swings: Record<string, number> = {};
+  swings: Record<string, SwingState> = {};
   muted = false;
   /** 로컬 시각 - 서버 시각 (지연 포함 추정치) */
   private offset: number | null = null;
@@ -133,9 +134,9 @@ export class WorldStore extends Emitter<StoreEvents> {
     socket.on('fx', (ev) => this.emit('fx', ev));
     socket.on('req', (r) => this.emit('req', r));
     socket.on('info', (t) => this.emit('info', t));
-    socket.on('swing', (seat, level) => {
-      this.swings[seat] = level;
-      this.emit('swing', seat, level);
+    socket.on('swing', (seat, st) => {
+      this.swings[seat] = st;
+      this.emit('swing', seat, st);
     });
     socket.on('fireQ', (q) => this.emit('fireQ', q));
     socket.on('notice', (t) => this.emit('notice', t));
@@ -175,6 +176,11 @@ export class WorldStore extends Emitter<StoreEvents> {
     let n = 0;
     for (const e of this.players.values()) if (e.info.status === 'online') n++;
     return n;
+  }
+
+  /** 현재 서버 시각 추정 (놀이기구처럼 모두가 같은 시각 기준으로 움직이는 연출용) */
+  serverNow(now = Date.now()) {
+    return now - (this.offset ?? 0);
   }
 
   /** 보간에 사용할 '서버 기준' 렌더 시각 */

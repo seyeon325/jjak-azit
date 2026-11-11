@@ -415,18 +415,23 @@ function swing(): PixelCanvas {
   pc.rect(7, 3, 46, 3, P.lemon);
   pc.hline(7, 52, 3, '#ffe6a3');
   pc.hline(7, 52, 5, P.lemonDark);
-  // 줄 + 의자
-  for (const [a, b] of [
-    [20, 27],
-    [33, 40],
-  ]) {
-    pc.vline(a, 6, 32, P.slateLight);
-    pc.vline(b, 6, 32, P.slateLight);
-    pc.rect(a - 1, 32, b - a + 3, 3, P.sky);
-    pc.hline(a - 1, b + 1, 34, P.skyDark);
+  // 줄·좌석은 따로 움직이므로(진자) 여기서는 고리만
+  for (const x of [20, 27, 33, 40]) {
+    pc.set(x, 6, P.slate);
+    pc.set(x, 7, P.slateLight);
   }
   pc.outline(OUT);
   return pc;
+}
+
+/** 그네 좌석 (줄에 매달려 흔들림) */
+export function buildSwingSeat(): HTMLCanvasElement {
+  const pc = new PixelCanvas(12, 6);
+  pc.rect(1, 1, 10, 3, P.sky);
+  pc.hline(1, 10, 1, P.skyLight);
+  pc.hline(1, 10, 3, P.skyDark);
+  pc.outline(OUT);
+  return pc.flush();
 }
 
 function seesaw(): PixelCanvas {

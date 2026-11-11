@@ -2,6 +2,7 @@
  * 네트워크 프로토콜 정의 (클라이언트 ↔ 서버).
  * 이벤트를 추가할 때는 여기에 타입을 먼저 선언하면 양쪽에서 자동완성/검사가 됩니다.
  */
+import type { SwingState } from './playground';
 import type { EmoteId, InteractionId, PoseId } from './social';
 
 export type Role = 'senior' | 'junior';
@@ -66,8 +67,8 @@ export interface RoomSnapshot {
   roomId: string;
   serverTime: number;
   players: PlayerInfo[];
-  /** 그네 흔들림 단계 (좌석 id → 0~) */
-  swings: Record<string, number>;
+  /** 그네 진자 상태 (좌석 id → 진폭·위상) */
+  swings: Record<string, SwingState>;
   display: DisplaySettings;
   teamNames: string[];
 }
@@ -250,7 +251,7 @@ export interface ServerToClientEvents {
   req: (ev: RequestEvent) => void;
   /** 내가 보낸 요청 결과 / 안내 */
   info: (text: string) => void;
-  swing: (seat: string, level: number) => void;
+  swing: (seat: string, st: SwingState) => void;
   fireQ: (question: string) => void;
   notice: (text: string) => void;
   display: (d: DisplaySettings) => void;

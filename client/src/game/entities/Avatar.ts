@@ -22,9 +22,15 @@ const HAND: Record<Dir, [number, number, number]> = {
 };
 
 /** 앉았을 때 엉덩이를 좌석 높이에 맞추는 위쪽 이동량 */
-const SIT_LIFT: Record<Seat['kind'], number> = { bench: 7, log: 5, swing: 7, seesaw: 6, spring: 9 };
+const SIT_LIFT: Record<Seat['kind'], number> = { bench: 7, log: 8, swing: -1, seesaw: 6, spring: 10 };
+/** 뒤돌아 앉는 통나무(남쪽)는 몸이 통나무 뒤로 살짝 숨도록 덜 올림 */
+const SIT_LIFT_BACK = 6;
 
-type Script = { start: number; dur: number; fn: (t: number) => { x: number; y: number; frame?: string; flip?: boolean } };
+type Script = {
+  start: number;
+  dur: number;
+  fn: (t: number) => { x: number; y: number; frame?: string; flip?: boolean; rot?: number; depth?: number };
+};
 
 /** 화면에 그려지는 캐릭터 하나 (내 캐릭터 / 다른 참가자 공용) */
 export class Avatar {
@@ -45,6 +51,9 @@ export class Avatar {
   rideX = 0;
   rideY = 0;
   rideRot = 0;
+  rideScale = 1;
+  /** 놀이기구가 정하는 그리기 순서 (null = 기본) */
+  rideDepth: number | null = null;
   jumpY = 0;
   dir: Dir;
   moving = false;
@@ -148,7 +157,9 @@ export class Avatar {
     if (seat === this.seat) return;
     this.seat = seat;
     this.rideX = this.rideY = this.rideRot = 0;
-    this.sprite.setRotation(0);
+    this.rideScale = 1;
+    this.rideDepth = null;
+    this.sprite.setRotation(0).setScale(1);
     this.clearPose();
     if (seat) {
       this.dir = seat.dir;
@@ -166,7 +177,7 @@ export class Avatar {
     this.clearPose();
     const now = this.scene.time.now;
     this.poseKind = kind;
-    const dur: Record<PoseId, number> = { wave: 1800, v: 1600, jump: 700, spin: 1100, sit: 60_000, dance: 6000, surprised: 1200, bump: 1700 };
+    const dur: Record<PoseId, number> = { wave: 1800, v: 1600, jump: 700, spin: 1100, sit: 60_000, dance: 6000, surprised: 1200, bump: 1700, push: 650 };
     this.poseUntil = now + dur[kind];
     if (kind === 'jump') {
       this.scene.tweens.add({ targets: this, jumpY: -9, duration: 170, yoyo: true, repeat: 1, ease: 'Quad.Out', onComplete: () => (this.jumpY = 0) });
@@ -185,6 +196,11 @@ export class Avatar {
       });
     }
     if (kind === 'surprised' || kind === 'bump') this.squash(0.8, 160);
+    if (kind === 'push') {
+      // 앞으로 쭉 미는 동작
+      this.scene.tweens.add({ targets: this, jumpY: 2, duration: 110, yoyo: true, ease: 'Quad.Out' });
+      this.squash(0.88, 120);
+    }
     this.animKey = '';
     this.playAnim();
   }
@@ -391,7 +407,7 @@ export class Avatar {
         }
         return;
       }
-      const st: Partial<Record<PoseId, string>> = { v: POSE_FRAMES.v, surprised: POSE_FRAMES.surprised, sit: POSE_FRAMES.sit, bump: POSE_FRAMES.bump };
+      const st: Partial<Record<PoseId, string>> = { v: POSE_FRAMES.v, surprised: POSE_FRAMES.surprised, sit: POSE_FRAMES.sit, bump: POSE_FRAMES.bump, push: POSE_FRAMES.push };
       if (st[k]) {
         this.setStatic(st[k]!);
         return;
@@ -421,6 +437,7 @@ export class Avatar {
     let dx = Math.round(this.displayX);
     let dy = Math.round(this.displayY);
     let lift = 0;
+    let scriptDepth: number | null = null;
 
     // 경로 연출
     if (this.script) {
@@ -429,8 +446,14 @@ export class Avatar {
       dx = Math.round(p.x);
       dy = Math.round(p.y);
       if (p.frame) this.sprite.anims.stop(), this.sprite.setFrame(p.frame).setFlipX(!!p.flip);
+      this.sprite.setRotation(p.rot ?? 0);
+      scriptDepth = p.depth ?? null;
       if (t >= 1) {
         this.script = null;
+        // 연출이 끝난 자리에서 이어서 걷도록 (서버 위치 갱신 전 계단 쪽으로 되돌아가는 깜빡임 방지)
+        this.x = p.x - this.sepX - this.rideX;
+        this.y = p.y - this.sepY;
+        this.sprite.setRotation(0);
         this.animKey = '';
         this.playAnim(false, true);
       }
@@ -457,14 +480,20 @@ export class Avatar {
       }
     }
 
-    const sitLift = this.seat ? SIT_LIFT[this.seat.kind] : 0;
+    const back = this.seat?.kind === 'log' && this.seat.dir === 1;
+    const sitLift = this.seat ? (back ? SIT_LIFT_BACK : SIT_LIFT[this.seat.kind]) : 0;
     const sink = this.bath ? BATH_SINK : 0;
     this.sprite.setPosition(dx, dy + sink - sitLift + this.rideY + this.jumpY + lift);
-    this.sprite.setRotation(this.rideRot);
+    if (!this.script) {
+      this.sprite.setRotation(this.rideRot);
+      if (this.seat && this.rideScale !== 1) this.sprite.setScale(this.rideScale);
+    }
     // 앉은 사람은 좌석보다 앞에 그려지도록
     // 그네·시소·스프링은 놀이기구 받침보다 앞에 그려야 올라탄 것처럼 보임
-    const rideFront = this.seat && this.seat.kind !== 'bench' && this.seat.kind !== 'log' ? 16 : this.seat ? 2 : 0;
-    this.sprite.setDepth(dy + rideFront + (this.isSelf ? 0.5 : 0));
+    // 통나무: 앞을 보고 앉으면 통나무 앞에, 뒤돌아 앉으면 통나무 뒤에 (다리가 가려짐)
+    const seatDepth = this.seat ? (back ? -3 : 2) : 0;
+    const base = scriptDepth ?? this.rideDepth ?? dy + seatDepth;
+    this.sprite.setDepth(base + (this.isSelf ? 0.5 : 0));
     this.shadow.setPosition(dx, dy).setScale(this.jumpY < -3 ? 0.7 : 1);
     this.ring?.setPosition(dx, dy);
     if (this.ripple) this.ripple.setPosition(dx, dy - 1).setDepth(dy + 0.7);
