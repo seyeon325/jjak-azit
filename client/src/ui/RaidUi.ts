@@ -53,6 +53,11 @@ export class RaidUi {
   private atkHold = 0;
   private lastBanner = '';
   private lastPhase = 'off';
+  private downCount: HTMLElement;
+  private helpBtn: HTMLButtonElement;
+  private call: HTMLElement;
+  private callTimer = 0;
+  private downAt = 0;
   private endAt = 0;
 
   constructor(
@@ -82,7 +87,7 @@ export class RaidUi {
     this.banner = h('div', { class: 'raid-banner hidden' });
     this.bubble = h('div', { class: 'raid-bubble hidden' });
     this.countdown = h('div', { class: 'raid-count hidden' });
-    const btn = (cls: string, label: string, sub: string, a: 'atk' | 'dodge' | 'revive' | 'final') => {
+    const btn = (cls: string, label: string, sub: string, a: 'atk' | 'dodge' | 'revive' | 'final' | 'help') => {
       const b = h('button', { type: 'button', class: `raid-btn ${cls}` }, h('span', {}, label), h('small', {}, sub));
       b.addEventListener('pointerdown', (e) => {
         e.preventDefault();
@@ -101,7 +106,17 @@ export class RaidUi {
     this.reviveBtn = btn('revive hidden', '살리기', 'E', 'revive');
     this.finalBtn = btn('final hidden', '최후의 제출!', 'F', 'final');
     this.btns = h('div', { class: 'raid-btns' }, this.finalBtn, this.reviveBtn, this.dodgeBtn, this.atkBtn);
-    this.downNote = h('div', { class: 'raid-down hidden' });
+    this.downCount = h('b', { class: 'raid-down-count' }, '');
+    this.helpBtn = h('button', { type: 'button', class: 'raid-help-btn', onclick: () => this.act('help') }, '살려줘!', h('small', {}, 'E'));
+    this.downNote = h(
+      'div',
+      { class: 'raid-down hidden' },
+      h('strong', {}, '쓰러졌어요!'),
+      h('span', {}, '동료가 다가와 ‘살리기’를 누르면 바로 일어나요'),
+      this.helpBtn,
+      this.downCount,
+    );
+    this.call = h('div', { class: 'raid-call hidden' });
     this.finalBox = h('div', { class: 'raid-final hidden' });
     this.result = h('div', { class: 'raid-result hidden' });
     this.awards = h('div', { class: 'raid-awards hidden' });
@@ -115,10 +130,25 @@ export class RaidUi {
       this.countdown,
       this.finalBox,
       this.downNote,
+      this.call,
       mode === 'player' ? this.btns : null,
     );
     this.el = h('div', { class: `raid-ui ${mode}` }, this.invite, this.lobby, this.hud, this.result, this.awards);
     store.on('raid', (st, prev) => this.apply(st, prev));
+    // 가까운 동료가 '살려줘!'를 외치면 크게 알림
+    store.on('rfx', (list) => {
+      for (const f of list) {
+        if (f.k !== 'help' || f.id === undefined || this.mode !== 'player' || f.id === this.store.selfId) continue;
+        const sc = this.scene();
+        if (!sc || sc.distTo(f.id) > 200) continue;
+        const name = this.store.players.get(f.id)?.info.nickname ?? '';
+        this.call.textContent = `${name} 님이 살려달래요! 가까이 가서 ‘살리기’`;
+        this.call.classList.remove('hidden');
+        clearTimeout(this.callTimer);
+        this.callTimer = window.setTimeout(() => this.call.classList.add('hidden'), 2200);
+        chime([880, 660], 0.08);
+      }
+    });
     store.on('reset', () => this.apply(store.raid, null));
     window.addEventListener('keydown', this.onKey);
     window.addEventListener('keyup', (e) => {
@@ -132,9 +162,12 @@ export class RaidUi {
     if (!this.sceneOn || this.mode !== 'player' || e.repeat) return;
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
-    const map: Record<string, 'atk' | 'dodge' | 'revive' | 'final'> = { Space: 'atk', KeyJ: 'atk', ShiftLeft: 'dodge', ShiftRight: 'dodge', KeyK: 'dodge', KeyE: 'revive', KeyF: 'final', Enter: 'final' };
-    const a = map[e.code];
+    const map: Record<string, 'atk' | 'dodge' | 'revive' | 'final' | 'help'> = { Space: 'atk', KeyJ: 'atk', ShiftLeft: 'dodge', ShiftRight: 'dodge', KeyK: 'dodge', KeyE: 'revive', KeyH: 'help', KeyF: 'final', Enter: 'final' };
+    let a = map[e.code];
     if (!a) return;
+    // 쓰러져 있을 때 E 는 '살려줘!'
+    const meDown = this.store.raid.players.find((p) => p[0] === this.store.selfId)?.[4] === 1;
+    if (a === 'revive' && meDown) a = 'help';
     e.preventDefault();
     e.stopPropagation();
     this.act(a);
@@ -150,7 +183,7 @@ export class RaidUi {
     return s && g!.scene.isActive('raid') ? s : null;
   }
 
-  private act(a: 'atk' | 'dodge' | 'revive' | 'final') {
+  private act(a: 'atk' | 'dodge' | 'revive' | 'final' | 'help') {
     this.scene()?.action(a);
   }
 
@@ -297,11 +330,12 @@ export class RaidUi {
     if (this.mode === 'player') {
       const down = me?.[4] === 1;
       this.finalBtn.classList.toggle('hidden', !fin || down || !!fin?.ids.includes(this.store.selfId ?? -1));
-      this.reviveBtn.classList.toggle('hidden', down || !this.scene()?.reviveTarget());
+      this.updateRevive(down);
       this.atkBtn.disabled = down || st.phase !== 'battle';
       this.dodgeBtn.disabled = down || st.phase !== 'battle';
-      this.downNote.classList.toggle('hidden', !down);
-      if (down) this.downNote.textContent = '쓰러졌어요… 잠시 뒤 자동으로 일어나요. 동료가 다가와 살려줄 수도 있어요!';
+      if (down && !this.downAt) this.downAt = Date.now();
+      if (!down) this.downAt = 0;
+      this.downNote.classList.toggle('hidden', !down || st.phase !== 'battle');
       this.btns.classList.toggle('hidden', st.phase !== 'battle' && st.phase !== 'countdown');
     }
   }
@@ -328,8 +362,25 @@ export class RaidUi {
       const p = sc.bossScreenPos();
       this.bubble.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) translate(-50%, -100%)`;
     }
-    if (this.mode === 'player' && st.phase === 'battle') this.reviveBtn.classList.toggle('hidden', !sc?.reviveTarget());
+    if (this.mode === 'player' && st.phase === 'battle') {
+      const meP = st.players.find((p) => p[0] === this.store.selfId);
+      this.updateRevive(meP?.[4] === 1);
+      if (this.downAt) {
+        const left = Math.max(0, Math.ceil((this.downAt + RAID.downMs - Date.now()) / 1000));
+        this.downCount.textContent = `${left}초 뒤 자동으로 일어나요`;
+      }
+    }
     if (st.final) this.renderHud(st);
+  }
+
+  /** 가까이 쓰러진 동료가 있으면 '○○ 살리기!' 버튼을 크게 */
+  private updateRevive(down: boolean) {
+    const name = down ? null : this.scene()?.reviveTarget() ?? null;
+    this.reviveBtn.classList.toggle('hidden', !name);
+    if (name) {
+      const span = this.reviveBtn.querySelector('span');
+      if (span && span.textContent !== `${name} 살리기!`) span.textContent = `${name} 살리기!`;
+    }
   }
 
   private renderResult(st: RaidState) {

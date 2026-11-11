@@ -627,6 +627,12 @@ check((await call(adm, 'adminRaid', { op: 'start' })).ok && (await until(() => r
 check(await until(() => raidSt?.phase === 'battle', 5000), '전투 시작 · 보스 등장');
 const max0 = raidSt!.boss.max;
 check(max0 > 0 && raidSt!.players.length === 4, `참가 인원에 맞춘 보스 체력 (${max0})`);
+// 보스 패턴: 전투가 시작되면 경고 구역이 먼저 표시됨
+check(await until(() => !!raidSt?.hazards.length, 6000), '보스 공격 경고 구역 표시 (공격 전에)');
+check(raidSt!.players.every((p) => p[3] <= RAID.playerHp) && RAID.playerHp === 1, '하트 1개 (맞으면 바로 쓰러짐)');
+// 이후 점검은 보스 자동 공격을 멈추고 진행 (개발 서버 전용 점검 기능 — 모두 회복)
+await call(adm, 'adminRaid', { op: 'debugCalm' });
+await sleep(300);
 // 이동 검증
 const ePos = rp(e.id)!;
 e.s.emit('ri', { x: ePos[1] + 200, y: ePos[2] - 150, d: 0 });
@@ -649,38 +655,30 @@ const hp2 = raidSt!.boss.hp;
 far.s.emit('ri', { a: 'atk' });
 await sleep(300);
 check(raidSt!.boss.hp === hp2, '사거리 밖 공격은 무효 (서버 거리 판정)');
-// 보스 패턴 · 피격 · 회피 (넓은 '마감 임박' 구역): 왼쪽에 두 명, 오른쪽에 두 명 세워 둠
-await Promise.all([rwalk(observer, 200, 250), rwalk(d, 214, 250), rwalk(e, 266, 250), rwalk(far, 280, 250)]);
-check(await until(() => !!raidSt?.hazards.length, 6000), '보스 공격 경고 구역 표시 (공격 전에)');
-const okDeadline = await until(() => !!raidSt?.hazards.some((hz) => hz.kind === 'deadline'), 12000);
-check(okDeadline, '마감 임박 넓은 구역 패턴');
-if (okDeadline) {
-  const hz = raidSt!.hazards.find((x) => x.kind === 'deadline')!;
-  const inside = (id: number) => {
-    const p = rp(id)!;
-    return p[1] >= hz.x && p[1] <= hz.x + hz.w && p[2] >= hz.y && p[2] <= hz.y + hz.h;
-  };
-  // 구역 쪽 두 명 중 한 명은 공격 직전에 회피, 한 명은 그대로
-  const pair = inside(observer.id) ? [observer, d] : [e, far];
-  const wait = hz.hitAt - Date.now() - 200;
-  if (wait > 0) await sleep(wait);
-  const aIn = inside(pair[0].id);
-  const bIn = inside(pair[1].id);
-  raidFx.length = 0;
-  pair[0].s.emit('ri', { a: 'dodge' });
-  await sleep(700);
-  check(bIn && raidFx.some((f) => f.k === 'hit' && f.id === pair[1].id), '경고 구역 안에 있으면 피격 (서버 판정)');
-  check(aIn && raidFx.some((f) => f.k === 'evade' && f.id === pair[0].id), '타이밍 맞춰 회피하면 피함');
-}
-// 이후 협동·부활 점검은 보스 공격을 멈추고 진행 (개발 서버 전용 점검 기능)
-await call(adm, 'adminRaid', { op: 'debugCalm' });
+// '마감 임박' 넓은 구역: 왼쪽에 두 명 세우고, 한 명은 직전에 회피 · 한 명은 그대로
+await Promise.all([rwalk(observer, 200, 250), rwalk(d, 214, 250)]);
+await call(adm, 'adminRaid', { op: 'debugHazard', ratio: 0 });
+check(await until(() => !!raidSt?.hazards.some((x) => x.kind === 'deadline')), '마감 임박 경고 구역 (2초 전에 표시)');
+const hz = raidSt!.hazards.find((x) => x.kind === 'deadline')!;
+const wait = hz.hitAt - Date.now() - 200;
+if (wait > 0) await sleep(wait);
+raidFx.length = 0;
+observer.s.emit('ri', { a: 'dodge' });
+await sleep(700);
+check(raidFx.some((f) => f.k === 'hit' && f.id === d.id), '경고 구역 안에 있으면 피격 (서버 판정)');
+check(raidFx.some((f) => f.k === 'down' && f.id === d.id) && rp(d.id)?.[4] === 1, '하트 1개라 한 번 맞으면 바로 쓰러짐');
+check(raidFx.some((f) => f.k === 'evade' && f.id === observer.id) && rp(observer.id)?.[4] !== 1, '타이밍 맞춰 회피하면 피함');
+// 쓰러진 사람의 '살려줘!' → 동료 부활
+raidFx.length = 0;
+d.s.emit('ri', { a: 'help' });
+d.s.emit('ri', { a: 'help' }); // 연타는 무시
 await sleep(300);
-// 쓰러짐 · 부활 지원
-await call(adm, 'adminRaid', { op: 'debugDown', id: d.id });
-await sleep(250);
-check(rp(d.id)?.[4] === 1, '체력 0이면 쓰러짐');
+check(raidFx.filter((f) => f.k === 'help' && f.id === d.id).length === 1, "쓰러지면 '살려줘!' 외치기 (모두에게 전달 · 연타 제한)");
+observer.s.emit('ri', { a: 'help' });
+await sleep(200);
+check(!raidFx.some((f) => f.k === 'help' && f.id === observer.id), "쓰러지지 않은 사람은 '살려줘!' 불가");
 const dp = rp(d.id)!;
-await rwalk(observer, dp[1] + 8, dp[2]);
+await rwalk(observer, dp[1] + 10, dp[2]);
 raidFx.length = 0;
 observer.s.emit('ri', { a: 'revive' });
 await sleep(300);

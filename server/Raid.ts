@@ -24,6 +24,7 @@ interface Part {
   lastAtk: number;
   lastDodge: number;
   lastRevive: number;
+  lastHelp: number;
   lastMove: number;
   stats: RaidStats;
 }
@@ -314,7 +315,7 @@ export class RaidGame {
     const row = Math.floor(i / 10);
     const x = RAID.W / 2 + ((i % 10) - (cols - 1) / 2) * 30;
     const y = RAID.H - 34 - row * 22;
-    this.parts.set(id, { id, x, y, d: 1, hp: RAID.playerHp, downUntil: 0, dodgeUntil: 0, lastAtk: 0, lastDodge: 0, lastRevive: 0, lastMove: Date.now(), stats: newStats() });
+    this.parts.set(id, { id, x, y, d: 1, hp: RAID.playerHp, downUntil: 0, dodgeUntil: 0, lastAtk: 0, lastDodge: 0, lastRevive: 0, lastHelp: 0, lastMove: Date.now(), stats: newStats() });
   }
 
   private activeParts(now = Date.now()) {
@@ -341,6 +342,11 @@ export class RaidGame {
       p.dodgeUntil = now + RAID.dodgeMs;
     }
     if (inp.a === 'revive' && !down) this.revive(p, now);
+    // 쓰러진 사람이 외치는 '살려줘!' (모두의 화면에 크게)
+    if (inp.a === 'help' && down && now - p.lastHelp >= RAID.helpCd) {
+      p.lastHelp = now;
+      this.fxq.push({ k: 'help', id: p.id });
+    }
     if (inp.a === 'final' && !down && this.final && now < this.final.endsAt) {
       this.final.ids.add(p.id);
       this.fxq.push({ k: 'final', id: p.id });
@@ -707,6 +713,13 @@ export class RaidGame {
       p.hp = RAID.playerHp;
       p.downUntil = 0;
     }
+  }
+
+  /** 테스트용 (개발 서버에서만): 마감 임박 구역을 지금 바로 (0 왼쪽 · 1 오른쪽) */
+  debugDeadline(side: 0 | 1) {
+    if (this.phase !== 'battle') return;
+    const now = Date.now();
+    this.hazards.push({ id: this.nextHazardId++, kind: 'deadline', shape: 'rect', x: side ? RAID.W / 2 + 10 : 0, y: 40, w: RAID.W / 2 - 10, h: RAID.H - 40, r: 0, at: now, hitAt: now + 2100 });
   }
 
   /** 테스트용 (개발 서버에서만): 참가자를 쓰러뜨림 */

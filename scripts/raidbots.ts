@@ -44,7 +44,11 @@ async function bot(i: number) {
     const r = st;
     if (!r || r.phase !== 'battle' || r.paused) return;
     const p = r.players.find((q) => q[0] === me);
-    if (!p || p[4] === 1) return;
+    if (!p) return;
+    if (p[4] === 1) {
+      if (Math.random() < 0.08) s.emit('ri', { a: 'help' }); // 쓰러지면 '살려줘!'
+      return;
+    }
     // 목표: 협동 구역 > 경고 구역 피하기 > 보스 근처 배회
     const zone = r.zones.find((z) => !z.on);
     const danger = r.hazards.find((h) => (h.shape === 'circle' ? Math.hypot(x - h.x, y - h.y) < h.r + 4 : x > h.x - 4 && x < h.x + h.w + 4 && y > h.y - 4 && y < h.y + h.h + 4));

@@ -13,7 +13,8 @@ export const RAID = {
   bossY: 96,
   /** 보스 몸 반지름 (이 안으로는 못 들어감) */
   bossR: 30,
-  playerHp: 3,
+  /** 하트 1개: 맞으면 바로 쓰러짐 → 동료 부활이 핵심 */
+  playerHp: 1,
   speed: 86,
   /** 일반 공격 간격·사거리 */
   atkCd: 380,
@@ -21,10 +22,12 @@ export const RAID = {
   dodgeCd: 1500,
   dodgeMs: 450,
   dodgeDist: 34,
-  /** 쓰러졌다가 자동 부활까지 */
-  downMs: 7000,
+  /** 쓰러졌다가 자동 부활까지 (길게 → 동료에게 살려달라고 하게) */
+  downMs: 12000,
+  /** '살려줘!' 외치기 간격 */
+  helpCd: 1500,
   /** 동료 부활 거리 */
-  reviveR: 24,
+  reviveR: 28,
   /** 전체 제한 시간 */
   battleMs: 4.5 * 60 * 1000,
   countdownMs: 3000,
@@ -43,7 +46,7 @@ export const RAID = {
 
 /** 참가자 수에 맞춘 보스 체력 (혼자여도 가능, 30명이어도 4~5분) */
 export function bossMaxHp(n: number) {
-  return Math.round(Math.max(120, n * 130));
+  return Math.round(Math.max(130, n * 145));
 }
 
 export type HazardKind = 'bomb' | 'deadline' | 'revision';
@@ -175,12 +178,12 @@ export interface RaidInput {
   x?: number;
   y?: number;
   d?: number;
-  a?: 'atk' | 'dodge' | 'revive' | 'final';
+  a?: 'atk' | 'dodge' | 'revive' | 'final' | 'help';
 }
 
 /** 일회성 연출 */
 export interface RaidFx {
-  k: 'atk' | 'hit' | 'boom' | 'down' | 'revive' | 'evade' | 'coop' | 'final' | 'shieldOff' | 'pattern';
+  k: 'atk' | 'hit' | 'boom' | 'down' | 'revive' | 'evade' | 'coop' | 'final' | 'shieldOff' | 'pattern' | 'help';
   id?: number;
   x?: number;
   y?: number;

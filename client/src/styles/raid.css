@@ -316,19 +316,87 @@ body.raid-on .screen-hud .qr-card {
 .raid-ui.screen .raid-final b {
   font-size: 40px;
 }
+/* 쓰러짐: 크게 '살려줘!' */
+.raid-hud > .raid-down {
+  pointer-events: auto;
+}
 .raid-down {
   position: absolute;
   left: 50%;
-  bottom: calc(150px + var(--safe-b));
+  bottom: calc(120px + var(--safe-b));
+  transform: translateX(-50%);
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  width: min(86%, 340px);
+  padding: 12px 14px 14px;
+  border-radius: 16px;
+  border: 3px solid var(--ink);
+  background: rgba(61, 48, 71, 0.9);
+  color: #fff;
+  text-align: center;
+}
+.raid-down strong {
+  font-family: var(--pixel-bold);
+  font-weight: 400;
+  font-size: 22px;
+  color: #ffb7a6;
+}
+.raid-down span {
+  font-size: 12px;
+}
+.raid-down-count {
+  font-family: var(--pixel);
+  font-weight: 400;
+  font-size: 12px;
+  color: #d5d9e8;
+}
+.raid-help-btn {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 64px;
+  border-radius: 16px;
+  border: 3px solid #fff;
+  background: var(--coral);
+  box-shadow: 0 4px 0 #2c2234;
+  color: #fff;
+  font-family: var(--pixel-bold);
+  font-size: 28px;
+  touch-action: manipulation;
+  animation: findPulse 0.8s ease-in-out infinite;
+}
+.raid-help-btn small {
+  font-family: var(--pixel);
+  font-size: 10px;
+  opacity: 0.8;
+}
+.raid-help-btn:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 #2c2234;
+}
+/* 근처 동료의 '살려줘!' 알림 */
+.raid-call {
+  position: absolute;
+  left: 50%;
+  top: calc(64px + var(--safe-t));
   transform: translateX(-50%);
   width: max-content;
-  max-width: 86%;
+  max-width: 92%;
   padding: 8px 14px;
   border-radius: 12px;
-  background: rgba(61, 48, 71, 0.85);
+  border: 3px solid var(--ink);
+  background: var(--coral);
   color: #fff;
-  font-size: 13px;
-  text-align: center;
+  font-family: var(--pixel-bold);
+  font-size: 15px;
+  box-shadow: 0 4px 0 var(--ink);
+  animation: raidCall 0.3s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+@keyframes raidCall {
+  from {
+    transform: translateX(-50%) scale(0.5);
+  }
 }
 /* 버튼 */
 .raid-btns {
@@ -383,8 +451,16 @@ body.raid-on .screen-hud .qr-card {
 .raid-btn.dodge {
   background: var(--sky-l);
 }
+/* 가까이 쓰러진 동료가 있을 때: '○○ 살리기!' 크게 */
 .raid-btn.revive {
-  background: var(--mint-l);
+  grid-column: 1 / -1;
+  width: auto;
+  height: 62px;
+  padding: 0 14px;
+  border-radius: 16px;
+  background: var(--mint);
+  font-size: 18px;
+  animation: findPulse 0.7s ease-in-out infinite;
 }
 .raid-btn.final {
   grid-column: 1 / -1;

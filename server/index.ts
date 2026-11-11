@@ -749,7 +749,7 @@ io.on('connection', (rawSocket) => {
       x: typeof inp.x === 'number' ? inp.x : undefined,
       y: typeof inp.y === 'number' ? inp.y : undefined,
       d: typeof inp.d === 'number' ? inp.d : undefined,
-      a: a === 'atk' || a === 'dodge' || a === 'revive' || a === 'final' ? a : undefined,
+      a: a === 'atk' || a === 'dodge' || a === 'revive' || a === 'final' || a === 'help' ? a : undefined,
     });
   });
 
@@ -773,6 +773,10 @@ io.on('connection', (rawSocket) => {
     if (op === 'allAwards') return done(ack, raid.all());
     if (op === 'close') {
       raid.close();
+      return done(ack, null);
+    }
+    if (op === 'debugHazard' && !IS_PROD) {
+      raid.debugDeadline(Number(payload.ratio) === 1 ? 1 : 0);
       return done(ack, null);
     }
     if (op === 'debugCalm' && !IS_PROD) {

@@ -301,7 +301,7 @@ export interface ClientToServerEvents {
   /** 이동·행동 입력 */
   ri: (input: RaidInput) => void;
   adminRaid: (
-    payload: { op: 'open' | 'start' | 'pause' | 'resume' | 'stop' | 'reset' | 'awards' | 'next' | 'prev' | 'allAwards' | 'close' | 'debugHp' | 'debugDown' | 'debugCalm'; ratio?: number; id?: number },
+    payload: { op: 'open' | 'start' | 'pause' | 'resume' | 'stop' | 'reset' | 'awards' | 'next' | 'prev' | 'allAwards' | 'close' | 'debugHp' | 'debugDown' | 'debugCalm' | 'debugHazard'; ratio?: number; id?: number },
     ack: (res: ActResult) => void,
   ) => void;
   adminRaidInfo: (ack: (res: RaidAdminInfo | { ok: false; reason: string }) => void) => void;

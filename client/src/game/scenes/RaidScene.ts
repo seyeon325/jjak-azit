@@ -34,6 +34,9 @@ interface PSprite {
   moving: boolean;
   state: number;
   anim: string;
+  /** 쓰러졌을 때 머리 위 '살려줘!' 표시 */
+  help: Phaser.GameObjects.Text | null;
+  ring: Phaser.GameObjects.Graphics | null;
 }
 
 const DIRK = ['d', 'u', 's', 's'];
@@ -126,7 +129,7 @@ export class RaidScene extends Phaser.Scene {
 
   // -------------------------------------------------------------- 행동 (UI 버튼·키보드)
 
-  action(a: 'atk' | 'dodge' | 'revive' | 'final') {
+  action(a: 'atk' | 'dodge' | 'revive' | 'final' | 'help') {
     const st = this.ctx.store.raid;
     if (st.phase !== 'battle' || st.paused) return;
     const now = this.time.now;
@@ -142,10 +145,21 @@ export class RaidScene extends Phaser.Scene {
   }
 
   /** 지금 살릴 수 있는 동료가 가까이 있는지 */
-  reviveTarget(): boolean {
+  reviveTarget(range = RAID.reviveR): string | null {
     const id = this.ctx.store.selfId;
-    for (const p of this.ctx.store.raid.players) if (p[0] !== id && p[4] === 1 && Math.hypot(p[1] - this.me.x, p[2] - this.me.y) <= RAID.reviveR) return true;
-    return false;
+    let best: { d: number; name: string } | null = null;
+    for (const p of this.ctx.store.raid.players) {
+      if (p[0] === id || p[4] !== 1) continue;
+      const d = Math.hypot(p[1] - this.me.x, p[2] - this.me.y);
+      if (d <= range && (!best || d < best.d)) best = { d, name: this.ctx.store.players.get(p[0])?.info.nickname ?? '' };
+    }
+    return best ? best.name : null;
+  }
+
+  /** 내 위치에서 이 참가자까지 거리 */
+  distTo(id: number) {
+    const p = this.ctx.store.raid.players.find((q) => q[0] === id);
+    return p ? Math.hypot(p[1] - this.me.x, p[2] - this.me.y) : Infinity;
   }
 
   /** 보스 머리 위 화면 좌표 (말풍선 위치용) */
@@ -193,7 +207,7 @@ export class RaidScene extends Phaser.Scene {
         const key = ensureCharacter(this, info.look);
         const shadow = this.add.image(sx, sy, 'shadow').setOrigin(0.5, 0.6).setDepth(-700);
         const sprite = this.add.sprite(sx, sy, key, 'd0').setOrigin(0.5, 24 / 26);
-        p = { id, sprite, shadow, key, x: sx, y: sy, tx: sx, ty: sy, dir: d, moving: false, state, anim: '' };
+        p = { id, sprite, shadow, key, x: sx, y: sy, tx: sx, ty: sy, dir: d, moving: false, state, anim: '', help: null, ring: null };
         this.ps.set(id, p);
         this.ctx.overlay.upsert(info, id === selfId);
       }
@@ -225,6 +239,8 @@ export class RaidScene extends Phaser.Scene {
       if (!seen.has(id)) {
         p.sprite.destroy();
         p.shadow.destroy();
+        p.help?.destroy();
+        p.ring?.destroy();
         this.ps.delete(id);
         this.ctx.overlay.remove(id);
       }
@@ -285,6 +301,29 @@ export class RaidScene extends Phaser.Scene {
     s.setFlipX(p.dir === 3 && p.state !== 1 && st.phase !== 'victory');
     s.setRotation(p.state === 1 ? -1.4 : 0);
     s.setAlpha(p.state === 2 ? 0.55 + 0.25 * Math.sin(now / 40) : p.state === 1 ? 0.75 : 1);
+    // 쓰러진 동료: 깜빡이는 빨간 원 + 머리 위 '살려줘!' (멀리서도 잘 보이게)
+    const down = p.state === 1 && st.phase === 'battle';
+    if (down && !p.help) {
+      p.help = this.add
+        .text(0, 0, '살려줘!', { fontFamily: 'Galmuri11 Bold, Galmuri11, sans-serif', fontSize: '28px', color: '#ffffff', backgroundColor: '#e2715f', padding: { x: 8, y: 4 }, resolution: 2 })
+        .setOrigin(0.5, 1)
+        .setScale(0.3)
+        .setDepth(5500);
+      p.ring = this.add.graphics().setDepth(-650);
+    }
+    if (!down && p.help) {
+      p.help.destroy();
+      p.ring?.destroy();
+      p.help = null;
+      p.ring = null;
+    }
+    if (p.help && p.ring) {
+      const pulse = 0.5 + 0.5 * Math.sin(now / 160);
+      p.help.setPosition(Math.round(p.x), Math.round(p.y) - 26 - pulse * 2);
+      p.ring.clear();
+      p.ring.lineStyle(2, 0xff6b6b, 0.5 + pulse * 0.5);
+      p.ring.strokeEllipse(Math.round(p.x), Math.round(p.y), RAID.reviveR * 2, RAID.reviveR * 1.2);
+    }
   }
 
   private drawBoss(st: RaidState) {
@@ -398,6 +437,17 @@ export class RaidScene extends Phaser.Scene {
       this.puff(p.x, p.y - 8, 0x7fd8b6);
     }
     if (f.k === 'coop' && f.x !== undefined && f.y !== undefined) this.puff(f.x, f.y, 0x7fd8b6, 22);
+    if (f.k === 'help' && p) {
+      // '살려줘요!!' 큰 외침
+      const t = this.add
+        .text(p.x, p.y - 30, '살려줘요!!', { fontFamily: 'Galmuri11 Bold, Galmuri11, sans-serif', fontSize: '40px', color: '#e2715f', stroke: '#ffffff', strokeThickness: 8, resolution: 2 })
+        .setOrigin(0.5, 1)
+        .setScale(0.2)
+        .setDepth(6000);
+      this.tweens.add({ targets: t, scale: 0.45, duration: 180, ease: 'Back.Out' });
+      this.tweens.add({ targets: t, y: p.y - 46, alpha: 0, delay: 900, duration: 500, onComplete: () => t.destroy() });
+      this.puff(p.x, p.y - 8, 0xff6b6b, 26);
+    }
     if (f.k === 'shieldOff') {
       this.puff(this.boss.x, this.boss.y - 30, 0x86c8f2, 40);
       this.shakeUntil = this.time.now + 500;
