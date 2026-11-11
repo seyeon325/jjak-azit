@@ -2,6 +2,7 @@
  * 네트워크 프로토콜 정의 (클라이언트 ↔ 서버).
  * 이벤트를 추가할 때는 여기에 타입을 먼저 선언하면 양쪽에서 자동완성/검사가 됩니다.
  */
+import type { EggAdminRow, EggEvent, EggId, HsState, MyTitles, PrizePool, PrizeSummary } from './events';
 import type { SwingState } from './playground';
 import type { EmoteId, InteractionId, PoseId } from './social';
 
@@ -51,11 +52,15 @@ export interface PlayerInfo extends Profile {
   followId: number | null;
   /** 장난(물풍선·뿅망치·그네 밀기 등) 받지 않기 */
   noPrank: boolean;
+  /** 학회장(운영자 인증한 참가자) */
+  host: boolean;
+  /** 장착한 칭호 (이스터에그 id) */
+  title: EggId | null;
 }
 
 /** 참가자 상태 일부 변경 */
 export type PlayerPatch = Partial<
-  Pick<PlayerInfo, 'food' | 'eating' | 'bath' | 'x' | 'y' | 'seat' | 'followId' | 'noPrank' | 'team' | 'gradeText'>
+  Pick<PlayerInfo, 'food' | 'eating' | 'bath' | 'x' | 'y' | 'seat' | 'followId' | 'noPrank' | 'team' | 'gradeText' | 'host' | 'title'>
 >;
 
 /** 위치 압축 표현: [id, x, y, dir, moving] */
@@ -71,6 +76,8 @@ export interface RoomSnapshot {
   swings: Record<string, SwingState>;
   display: DisplaySettings;
   teamNames: string[];
+  /** 학회장을 찾아라! 진행 상태 */
+  hs: HsState;
 }
 
 export type JoinResult =
@@ -89,7 +96,8 @@ export type ActRequest =
   | { t: 'sit'; seat: string }
   | { t: 'stand' }
   | { t: 'slide' }
-  | { t: 'push'; seat: string };
+  | { t: 'push'; seat: string }
+  | { t: 'secret' };
 export type ActResult = { ok: true } | { ok: false; reason: string };
 
 // ------------------------------------------------------------------ 게시판
@@ -184,6 +192,15 @@ export interface AdminNote extends BoardNote {
   commentList: (BoardComment & { ownerKey: string })[];
 }
 
+export interface AdminHsInfo {
+  ok: true;
+  state: HsState;
+  /** 학회장으로 숨을 수 있는 참가자 (참가자 화면에서 학회장 로그인한 사람) */
+  hosts: { id: number; nickname: string; online: boolean }[];
+  /** 진행 중인 회차의 학회장 */
+  hostId: number | null;
+}
+
 export interface ClientToServerEvents {
   /** 새 캐릭터로 입장. uid = 브라우저에 저장된 기기 키 (게시물 소유권 유지용) */
   join: (
@@ -230,6 +247,33 @@ export interface ClientToServerEvents {
   adminDeleteNote: (payload: { id: number }, ack: (res: ActResult) => void) => void;
   adminDeleteComment: (payload: { id: number }, ack: (res: ActResult) => void) => void;
 
+  // 학회장을 찾아라! (시작·종료는 운영자만, 발견 판정은 서버)
+  hsFind: (ack: (res: ActResult) => void) => void;
+  adminHs: (
+    payload: { cmd: 'start' | 'end' | 'cancel' | 'reset'; searchSec?: number; hostId?: number },
+    ack: (res: ActResult) => void,
+  ) => void;
+  adminHsInfo: (ack: (res: AdminHsInfo | { ok: false; reason: string }) => void) => void;
+
+  // 상품
+  adminPrizes: (ack: (res: PrizeSummary | { ok: false; reason: string }) => void) => void;
+  adminPrizeSet: (
+    payload:
+      | { op: 'paid'; awardId: number; paid: boolean }
+      | { op: 'revoke'; awardId: number }
+      | { op: 'alloc'; itemId: string; total: number; alloc: Partial<Record<PrizePool, number>> },
+    ack: (res: ActResult) => void,
+  ) => void;
+
+  // 이스터에그 · 칭호
+  myTitles: (ack: (res: MyTitles) => void) => void;
+  setTitle: (payload: { id: EggId | null }, ack: (res: ActResult) => void) => void;
+  adminEggs: (ack: (res: EggAdminRow[] | { ok: false; reason: string }) => void) => void;
+  adminEggSet: (
+    payload: { id: EggId; enabled?: boolean; need?: number; broadcast?: boolean; reset?: boolean },
+    ack: (res: ActResult) => void,
+  ) => void;
+
   leave: () => void;
 }
 
@@ -257,6 +301,10 @@ export interface ServerToClientEvents {
   display: (d: DisplaySettings) => void;
   teamNames: (names: string[]) => void;
   muted: (muted: boolean) => void;
+  /** 학회장을 찾아라! 상태 */
+  hs: (st: HsState) => void;
+  /** 이스터에그 최초 달성 (전체 공개 설정이면 모두에게, 아니면 달성자에게만) */
+  egg: (ev: EggEvent) => void;
 
   // 게시판
   bn: (note: BoardNote) => void;

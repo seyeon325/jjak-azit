@@ -6,6 +6,7 @@
 import { INTERP_DELAY_MS, TICK_HZ } from '../../../shared/constants';
 import type { EmoteId, PoseId } from '../../../shared/social';
 import type { SwingState } from '../../../shared/playground';
+import { HS_IDLE, hsActive, type EggEvent, type HsState } from '../../../shared/events';
 import type {
   BoardComment,
   BoardNote,
@@ -68,6 +69,8 @@ type StoreEvents = {
   display: [DisplaySettings];
   teamNames: [string[]];
   muted: [boolean];
+  hs: [HsState, HsState];
+  egg: [EggEvent];
 };
 
 const TICK_MS = 1000 / TICK_HZ;
@@ -79,6 +82,10 @@ export class WorldStore extends Emitter<StoreEvents> {
   teamNames: string[] = [];
   swings: Record<string, SwingState> = {};
   muted = false;
+  /** 학회장을 찾아라! 상태 */
+  hs: HsState = { ...HS_IDLE };
+  /** 이 화면이 학회장(운영자 인증한 참가자) 계정인지 */
+  hostAccount = false;
   /** 로컬 시각 - 서버 시각 (지연 포함 추정치) */
   private offset: number | null = null;
 
@@ -152,6 +159,35 @@ export class WorldStore extends Emitter<StoreEvents> {
       this.muted = m;
       this.emit('muted', m);
     });
+    socket.on('hs', (st) => this.setHs(st));
+    socket.on('egg', (ev) => this.emit('egg', ev));
+  }
+
+  private setHs(st: HsState) {
+    const prev = this.hs;
+    // 같은 회차의 학회장 정보는 (학회장 본인·운영자에게만 오는 값이라) 유지
+    if (st.hostId === null && prev.round === st.round && prev.hostId !== null && hsActive(st.phase)) st = { ...st, hostId: prev.hostId };
+    this.hs = st;
+    this.emit('hs', st, prev);
+  }
+
+  /** 숨바꼭질이 아지트에 영향을 주는 중 */
+  get hsActive() {
+    return hsActive(this.hs.phase);
+  }
+
+  /** 내가 이번 회차의 학회장 */
+  get iAmHost() {
+    return this.selfId !== null && this.hs.hostId === this.selfId;
+  }
+
+  /** 지금 내 캐릭터가 움직이면 안 되는지 (서버 규칙과 같음) */
+  get frozen() {
+    const h = this.hs;
+    if (h.phase === 'hiding') return h.paused || !this.iAmHost;
+    if (h.phase === 'searching') return h.paused || this.iAmHost;
+    if (h.phase === 'found' || h.phase === 'timeout') return this.serverNow() < h.endsAt - (h.phase === 'found' ? 4500 : 5000);
+    return false;
   }
 
   reset(room: RoomSnapshot, selfId: number | null) {
@@ -162,6 +198,7 @@ export class WorldStore extends Emitter<StoreEvents> {
     if (room.display) this.display = room.display;
     if (room.teamNames) this.teamNames = room.teamNames;
     for (const p of room.players) this.add(p, false);
+    if (room.hs) this.setHs(room.hs);
     this.emit('reset');
     this.emit('count', this.onlineCount);
     this.emit('display', this.display);

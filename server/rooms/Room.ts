@@ -67,18 +67,32 @@ export class Room {
     return this.players.get(id)?.info;
   }
 
-  snapshot(): RoomSnapshot {
+  /**
+   * 방 전체 상태. viewerId 를 주면 그 사람에게 보여도 되는 정보만 담습니다.
+   * (예: 숨바꼭질 숨는 단계에서는 학회장 위치를 학회장 본인에게만)
+   */
+  snapshot(viewerId: number | null = null): RoomSnapshot {
     return {
       roomId: this.id,
       serverTime: Date.now(),
-      players: [...this.players.values()].map((p) => ({ ...p.info })),
+      players: [...this.players.values()].map((p) => this.maskFor({ ...p.info }, viewerId)),
       ...this.extraSnapshot(),
     };
   }
 
+  /** 하위 클래스: 보는 사람에 따라 참가자 정보를 가림 */
+  protected maskFor(p: PlayerInfo, _viewerId: number | null): PlayerInfo {
+    return p;
+  }
+
   /** 하위 클래스가 스냅숏에 덧붙일 정보 */
   protected extraSnapshot(): Omit<RoomSnapshot, 'roomId' | 'serverTime' | 'players'> {
-    return { swings: {}, display: { hideNames: false, hideTeams: false, hideBubbles: false, photo: false }, teamNames: [] };
+    return {
+      swings: {},
+      display: { hideNames: false, hideTeams: false, hideBubbles: false, photo: false },
+      teamNames: [],
+      hs: { phase: 'ready', round: 0, hostId: null, endsAt: 0, searchMs: 0, paused: false, leftMs: 0, winner: null, reveal: null, winnerPos: null },
+    };
   }
 
   /** 좌석·미끄럼틀 등으로 지금 움직일 수 없는지 */
@@ -86,9 +100,24 @@ export class Room {
     return false;
   }
 
+  /** 이벤트 규칙으로 이동이 막혔는지 (보정 좌표를 돌려보냄) */
+  protected moveBlocked(_id: number): boolean {
+    return false;
+  }
+
+  /** 위치 방송에서 뺄 참가자 (숨는 중인 학회장) */
+  protected hiddenId(): number | null {
+    return null;
+  }
+
   /** 모든 참가자 (내부용) */
   protected all() {
     return [...this.players.values()].map((r) => r.info);
+  }
+
+  /** 모든 참가자 (이벤트 처리용, 읽기 전용으로 사용) */
+  list(): readonly PlayerInfo[] {
+    return this.all();
   }
 
   addPlayer(info: PlayerInfo) {
@@ -118,7 +147,15 @@ export class Room {
     const rec = this.players.get(id);
     if (!rec) return;
     Object.assign(rec.info, patch);
-    if (patch.x !== undefined || patch.y !== undefined) rec.lastMoveAt = Date.now();
+    if (patch.x !== undefined || patch.y !== undefined) {
+      rec.lastMoveAt = Date.now();
+      if (id === this.hiddenId()) {
+        // 숨는 중인 학회장의 좌표는 방송하지 않음
+        const { x: _x, y: _y, ...rest } = patch;
+        if (Object.keys(rest).length) this.io.to(this.channel).emit('pu', id, rest);
+        return;
+      }
+    }
     this.io.to(this.channel).emit('pu', id, patch);
   }
 
@@ -136,6 +173,11 @@ export class Room {
     const [x, y, dir, moving] = input;
     const info = rec.info;
     if (info.seat || this.locked(id)) return null; // 앉아 있거나 놀이기구 이용 중이면 이동 무시
+    if (this.moveBlocked(id)) {
+      // 숨바꼭질 블라인드·발견 연출 중: 서버 위치로 되돌림
+      rec.lastMoveAt = now;
+      return input[0] !== info.x || input[1] !== info.y ? { x: info.x, y: info.y } : null;
+    }
     const dt = Math.min(1, Math.max(0, (now - rec.lastMoveAt) / 1000));
     const allowed = MOVE_SPEED * dt * 1.6 + 14;
     const dist = Math.hypot(x - info.x, y - info.y);
@@ -163,7 +205,9 @@ export class Room {
     const states: PlayerState[] = [];
     // 3초마다 전체 위치를 한 번 더 보내 유실된 패킷을 보정
     const full = ++this.tickCount % (TICK_HZ * 3) === 0;
+    const hidden = this.hiddenId();
     for (const rec of this.players.values()) {
+      if (rec.info.id === hidden) continue; // 숨는 학회장 위치는 아무에게도 보내지 않음
       if (!rec.dirty && !full) continue;
       rec.dirty = false;
       const p = rec.info;

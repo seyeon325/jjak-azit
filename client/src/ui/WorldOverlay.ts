@@ -8,6 +8,7 @@ import type { PlayerInfo } from '../../../shared/protocol';
 import { LOOKS } from '../game/art/characters';
 import { ICON } from './dom';
 import { TEAMS, teamSvg } from '../../../shared/social';
+import { EGG_BY_ID } from '../../../shared/events';
 
 interface Plate {
   el: HTMLDivElement;
@@ -86,6 +87,23 @@ export class WorldOverlay {
     name.className = 'plate-name';
     name.textContent = info.nickname;
     el.append(badge, name);
+    // 학회장 배지 (숨바꼭질 중에는 서버가 host=false 로 바꿔 숨김)
+    if (info.host) {
+      const s = document.createElement('span');
+      s.className = 'plate-host';
+      s.textContent = '학회장';
+      el.append(s);
+    }
+    // 이스터에그 칭호: 이름표 위쪽 작은 배지 (학년·팀 심볼과 겹치지 않게 따로 줄)
+    const egg = info.title ? EGG_BY_ID.get(info.title) : undefined;
+    el.classList.toggle('has-title', !!egg);
+    if (egg) {
+      const t = document.createElement('span');
+      t.className = 'plate-title';
+      t.style.setProperty('--ec', egg.color);
+      t.textContent = egg.title;
+      el.append(t);
+    }
     if (info.bath) {
       const s = document.createElement('span');
       s.className = 'plate-tag spring';

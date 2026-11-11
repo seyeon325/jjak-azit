@@ -11,19 +11,25 @@ export interface Session {
   ownerKey: string;
   socketId: string | null;
   graceTimer: NodeJS.Timeout | null;
+  /** 학회장(운영자 인증) 참가자 — 재접속해도 유지 */
+  admin: boolean;
 }
 
 export class SessionStore {
   private byToken = new Map<string, Session>();
 
   create(token: string, playerId: number, nickname: string, ownerKey: string): Session {
-    const s: Session = { token, playerId, nickname, ownerKey, socketId: null, graceTimer: null };
+    const s: Session = { token, playerId, nickname, ownerKey, socketId: null, graceTimer: null, admin: false };
     this.byToken.set(token, s);
     return s;
   }
 
   get(token: string | undefined): Session | undefined {
     return token ? this.byToken.get(token) : undefined;
+  }
+
+  all(): Session[] {
+    return [...this.byToken.values()];
   }
 
   byPlayer(playerId: number): Session | undefined {

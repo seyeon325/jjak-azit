@@ -51,6 +51,7 @@ export function parseAct(raw: unknown): ActRequest | null {
   if (r.t === 'food' && FOOD_IDS.includes(r.food as FoodId)) return { t: 'food', food: r.food as FoodId };
   if (r.t === 'stand') return { t: 'stand' };
   if (r.t === 'slide') return { t: 'slide' };
+  if (r.t === 'secret') return { t: 'secret' };
   if ((r.t === 'sit' || r.t === 'push') && typeof r.seat === 'string' && WORLD.seats.some((x) => x.id === r.seat))
     return { t: r.t, seat: r.seat };
   return null;

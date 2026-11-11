@@ -113,7 +113,7 @@ export interface WorldMap {
   /** 온천 안에서의 충돌 (물 안쪽만 이동 가능) */
   bathGrid: CollisionGrid;
   spawn: { x: number; y: number; w: number; h: number };
-  spots: { foodtruck: Spot; board: Spot; spring: Spot; campfire: Spot };
+  spots: { foodtruck: Spot; board: Spot; spring: Spot; campfire: Spot; secret: Spot };
   seats: Seat[];
   slide: { enter: { x: number; y: number }; top: { x: number; y: number }; bottom: { x: number; y: number }; exit: { x: number; y: number } };
 }
@@ -518,6 +518,8 @@ function buildMap(): WorldMap {
       board: { x: px(30), y: px(15) + 10, r: INTERACT_RANGE + 6 },
       spring: { x: px(30), y: px(28) + 8, r: 92 },
       campfire: { x: fx, y: fy - 4, r: 72 },
+      /** 이스터에그: 게임 포털 오른쪽 수정 (비밀 발견자) */
+      secret: { x: px(54) + 10, y: px(9) + 4, r: 24 },
     },
   };
 }

@@ -8,6 +8,7 @@ import './styles/fonts.css';
 import './styles/main.css';
 import './styles/features.css';
 import './styles/social.css';
+import './styles/events.css';
 import type Phaser from 'phaser';
 import type { JoinResult, Profile } from '../../shared/protocol';
 import { gradeLabel } from '../../shared/foods';
@@ -18,6 +19,7 @@ import { Network, Storage } from './net/Network';
 import { WorldStore } from './state/WorldStore';
 import { AdminPanel, adminLogin, adminToken, clearAdminToken } from './ui/AdminPanel';
 import { h } from './ui/dom';
+import { HideSeekUi } from './ui/HideSeekUi';
 import { Hud } from './ui/Hud';
 import { Joystick } from './ui/Joystick';
 import { LoginScreen } from './ui/LoginScreen';
@@ -130,9 +132,19 @@ async function runPlayer() {
     hooks.hud = hud;
     hud.applyDisplay();
     if (Storage.prefs.noPrank) net.socket.emit('setPref', { noPrank: true });
-    g.stage.append(hud.el, new Joystick(input).el);
+    g.stage.append(hud.el, new Joystick(input).el, new HideSeekUi(store, g.scene, 'player').el);
+    await restoreHost();
     const me = store.self;
     if (me) hud.toast(`어서 와요, ${gradeLabel(me.grade, me.gradeText)} ${me.nickname} ${me.role === 'senior' ? '선배' : '후배'}님!`, 'info');
+  };
+
+  /** 이 탭에서 학회장 로그인을 했었다면 새 연결에도 권한 다시 확인 (서버는 같은 세션이면 권한 유지) */
+  const restoreHost = async () => {
+    const t = adminToken();
+    if (!t) return;
+    const r = await net.req('adminAuth', { token: t });
+    if (r.ok) hud?.setHostAccount(true);
+    else clearAdminToken();
   };
 
   // 저장된 세션이 있으면 바로 복귀 (새로고침 대응)
@@ -206,6 +218,7 @@ async function runPlayer() {
       store.muted = res.muted;
       store.reset(res.room, res.selfId);
       hud?.setConn('restored');
+      await restoreHost();
     } else hud?.setConn('error', res.reason);
   });
   net.socket.on('replaced', () => {
@@ -261,7 +274,7 @@ async function runScreen(admin: boolean) {
   g.overlay.addZoneLabels(WORLD.zones);
   const hud = new ScreenHud(store, g.scene, g.canvasHost);
   hooks.screen = hud;
-  g.stage.append(hud.el);
+  g.stage.append(hud.el, new HideSeekUi(store, g.scene, 'screen').el);
   const applyDisplay = () => {
     const d = store.display;
     g.overlay.setHidden({ names: d.hideNames || d.photo, teams: d.hideTeams, bubbles: d.hideBubbles || d.photo });
@@ -272,7 +285,7 @@ async function runScreen(admin: boolean) {
   store.on('chat', (m) => g.overlay.bubble(m.from, m.text, 4200, `ch-${m.ch}`));
 
   if (admin && token) {
-    const panel = new AdminPanel(store, net, token, (id) => hud.track(id), () => {
+    const panel = new AdminPanel(store, net, token, hud, () => {
       clearAdminToken();
       location.reload();
     });

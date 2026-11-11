@@ -7,6 +7,7 @@ import Phaser from 'phaser';
 import { BATH_SPEED, CAMPFIRE_R, MOVE_SPEED, SEAT_RANGE, SEND_HZ, WORLD_H, WORLD_W } from '../../../../shared/constants';
 import type { FxEvent } from '../../../../shared/protocol';
 import { SLIDE_TIMES, SWING, swingAngle, swingSeatOffset } from '../../../../shared/playground';
+import { HS } from '../../../../shared/events';
 import { foodDef } from '../../../../shared/foods';
 import { nearSpot, nearSpringEdge, T, WORLD, zoneAt, type TileType, type Zone } from '../../../../shared/map';
 import type { Dir, FoodId, PlayerInfo } from '../../../../shared/protocol';
@@ -38,6 +39,12 @@ export interface InteractState {
   player: { id: number; name: string; d: number } | null;
   following: number | null;
   sliding: boolean;
+  /** 숨바꼭질: 학회장 바로 옆 → '찾았다!!' */
+  findHost: boolean;
+  /** 이스터에그: 비밀 오브젝트 근처 */
+  secret: boolean;
+  /** 숨바꼭질 등으로 조작이 멈춤 */
+  frozen: boolean;
 }
 
 export interface GameContext {
@@ -59,6 +66,27 @@ export type ScreenCamMode = 'all' | 'follow' | 'track' | 'free' | 'photo';
 
 const SEP_RADIUS = 9;
 
+/** 조작이 멈췄을 때 (버튼 없음) */
+const FROZEN_STATE: InteractState = {
+  nearFood: false,
+  nearSpring: false,
+  nearBoard: false,
+  bath: false,
+  food: null,
+  eating: false,
+  seat: null,
+  seated: null,
+  push: null,
+  nearSlide: null,
+  inFire: false,
+  player: null,
+  following: null,
+  sliding: false,
+  findHost: false,
+  secret: false,
+  frozen: true,
+};
+
 export class WorldScene extends Phaser.Scene {
   private ctx!: GameContext;
   private avatars = new Map<number, Avatar>();
@@ -77,6 +105,9 @@ export class WorldScene extends Phaser.Scene {
   private swingRigs: { id: string; x: number; restY: number; pivotY: number; base: number; seat: Phaser.GameObjects.Image; theta: number }[] = [];
   private swingGfx: Phaser.GameObjects.Graphics | null = null;
   private showTeams = true;
+  /** 이벤트 연출용 카메라 목표 (발견 장면: 학회장 + 발견자). 관전 화면은 기존 관전 카메라가 이 목표를 따라감 */
+  private focus: { x: number; y: number }[] | null = null;
+  private focusZoom = 0;
 
   constructor() {
     super('world');
@@ -402,6 +433,14 @@ export class WorldScene extends Phaser.Scene {
     let tx = WORLD_W / 2;
     let ty = WORLD_H / 2;
     const mode = this.screenCamMode;
+    if (this.focus?.length) {
+      // 이벤트 연출: 지정한 지점들이 모두 보이도록 (단체 사진 모드와 같은 방식)
+      const t = this.focusTarget(cam.width, cam.height, fit, 3.4);
+      const k = 1 - Math.pow(0.03, dt);
+      cam.setZoom(cam.zoom + (t.z - cam.zoom) * k);
+      cam.centerOn(cam.midPoint.x + (t.x - cam.midPoint.x) * k, cam.midPoint.y + (t.y - cam.midPoint.y) * k);
+      return;
+    }
     if (mode === 'free') {
       if (!this.freeCam.z) this.freeCam = { x: cam.midPoint.x, y: cam.midPoint.y, z: cam.zoom };
       tz = this.freeCam.z;
@@ -448,6 +487,80 @@ export class WorldScene extends Phaser.Scene {
     cam.centerOn(cx, cy);
   }
 
+  private focusTarget(w: number, h: number, minZ: number, maxZ: number) {
+    const pts = this.focus!;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const p of pts) {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y - 22);
+      maxY = Math.max(maxY, p.y);
+    }
+    const pad = 40;
+    const z = Phaser.Math.Clamp(Math.min(w / (maxX - minX + pad * 2), h / (maxY - minY + pad * 2)), minZ, maxZ);
+    return { x: (minX + maxX) / 2, y: (minY + maxY) / 2, z };
+  }
+
+  /**
+   * 이벤트 연출 카메라: 지점들이 한 화면에 들어오게 확대 (null 이면 원래 카메라로 복귀)
+   * 참가자 화면은 내 캐릭터 따라가기를 잠시 멈추고, 관전 화면은 관전 카메라가 그대로 이어받음
+   */
+  focusOn(points: { x: number; y: number }[] | null) {
+    const cam = this.cameras.main;
+    this.focus = points && points.length ? points : null;
+    if (this.ctx.mode !== 'player') return;
+    if (this.focus) {
+      cam.stopFollow();
+      cam.removeBounds();
+    } else {
+      cam.setBounds(0, 0, WORLD_W, WORLD_H);
+      this.applyZoom();
+      if (this.self) cam.startFollow(this.self.sprite, true, 0.14, 0.14);
+    }
+  }
+
+  private updatePlayerFocus(dt: number) {
+    const cam = this.cameras.main;
+    const base = this.focusZoom || cam.zoom;
+    if (!this.focusZoom) this.focusZoom = cam.zoom;
+    const t = this.focusTarget(cam.width, cam.height, 1.2, Math.max(base, 2.5));
+    const k = 1 - Math.pow(0.03, dt);
+    cam.setZoom(cam.zoom + (t.z - cam.zoom) * k);
+    cam.centerOn(cam.midPoint.x + (t.x - cam.midPoint.x) * k, cam.midPoint.y + (t.y - cam.midPoint.y) * k);
+  }
+
+  /** 별·종이 폭죽 */
+  celebrate(x: number, y: number) {
+    const colors = [0xff6b6b, 0xffcb3d, 0x62c46a, 0x5aa3f0, 0xa98bf0, 0xff8fc0, 0xffffff];
+    for (let i = 0; i < 46; i++) {
+      const c = colors[i % colors.length];
+      const star = i % 6 === 0;
+      const o = star
+        ? this.add.star(x, y - 14, 5, 1.5, 3.5, 0xffe066).setDepth(9400)
+        : this.add.rectangle(x, y - 14, 2, 3, c).setDepth(9400);
+      const ang = -Math.PI / 2 + (Math.random() - 0.5) * 2.4;
+      const sp = 40 + Math.random() * 70;
+      const vx = Math.cos(ang) * sp;
+      const vy = Math.sin(ang) * sp;
+      const dur = 1400 + Math.random() * 900;
+      this.tweens.addCounter({
+        from: 0,
+        to: 1,
+        duration: dur,
+        onUpdate: (tw) => {
+          const t = (tw.getValue() ?? 0) * (dur / 1000);
+          o.setPosition(x + vx * t, y - 14 + vy * t + 70 * t * t);
+          o.setRotation(t * 8 * (i % 2 ? 1 : -1));
+          o.setAlpha(Math.min(1, 2.2 - t * 1.2));
+        },
+        onComplete: () => o.destroy(),
+      });
+    }
+  }
+
   // -------------------------------------------------------------- 프레임 업데이트
 
   update(_time: number, deltaMs: number) {
@@ -477,6 +590,13 @@ export class WorldScene extends Phaser.Scene {
     }
 
     if (this.ctx.mode === 'screen') this.updateScreenCamera(dt);
+    else if (this.focus) this.updatePlayerFocus(dt);
+    else this.focusZoom = 0;
+
+    // 관전 화면: 수색 중에는 숨은 학회장을 비추지 않음 (빔프로젝터로 위치가 드러나지 않게)
+    const hs = store.hs;
+    const conceal = this.ctx.mode === 'screen' && hs.phase === 'searching' ? hs.hostId : null;
+    for (const [id, a] of this.avatars) a.setConcealed(id === conceal);
   }
 
   private updateSelf(dt: number) {
@@ -498,8 +618,9 @@ export class WorldScene extends Phaser.Scene {
         }
       }
     }
-    // 먹는 중·앉은 중·미끄럼틀 타는 중에는 멈춤
-    const v = self.eating || self.seat || self.scripted ? { x: 0, y: 0 } : raw;
+    // 먹는 중·앉은 중·미끄럼틀 타는 중·숨바꼭질 블라인드 중에는 멈춤
+    const frozen = this.ctx.store.frozen;
+    const v = frozen || self.eating || self.seat || self.scripted ? { x: 0, y: 0 } : raw;
     const moving = v.x !== 0 || v.y !== 0;
     const speed = MOVE_SPEED * (self.bath ? BATH_SPEED : 1);
     let dx = v.x * speed * dt;
@@ -551,7 +672,7 @@ export class WorldScene extends Phaser.Scene {
     }
 
     // 상호작용 가능 여부 (바뀔 때만 HUD 에 알림)
-    const st: InteractState = {
+    const st: InteractState = frozen ? FROZEN_STATE : {
       nearFood: !self.bath && nearSpot(WORLD.spots.foodtruck, self.x, self.y),
       nearSpring: !self.bath && nearSpringEdge(self.x, self.y),
       nearBoard: !self.bath && nearSpot(WORLD.spots.board, self.x, self.y),
@@ -631,12 +752,24 @@ export class WorldScene extends Phaser.Scene {
     const ds = Math.hypot(self.x - sl.x, self.y - sl.y);
     const fire = WORLD.spots.campfire;
     let player: InteractState['player'] = null;
-    for (const a of this.avatars.values()) {
-      if (a === self || a.away) continue;
-      const d = Math.hypot(a.x - self.x, a.y - self.y);
-      if (d < 64 && (!player || d < player.d)) player = { id: a.info.id, name: a.info.nickname, d };
+    const hs = store.hs;
+    // 숨바꼭질 중에는 다른 참가자 메뉴(이름이 보임)를 열지 않음
+    if (!store.hsActive)
+      for (const a of this.avatars.values()) {
+        if (a === self || a.away) continue;
+        const d = Math.hypot(a.x - self.x, a.y - self.y);
+        if (d < 64 && (!player || d < player.d)) player = { id: a.info.id, name: a.info.nickname, d };
+      }
+    let findHost = false;
+    if (hs.phase === 'searching' && !hs.paused && hs.hostId !== null && !store.iAmHost && !store.hostAccount && !self.bath) {
+      const h = this.avatars.get(hs.hostId);
+      // 서버는 서버 위치로 다시 확인하므로 화면에서는 조금 여유 있게
+      if (h && Math.hypot(h.x - self.x, h.y - self.y) <= HS.findR - 2) findHost = true;
     }
     return {
+      findHost,
+      secret: !store.hsActive && !self.bath && nearSpot(WORLD.spots.secret, self.x, self.y),
+      frozen: false,
       seat,
       seated: self.seat ? { id: self.seat.id, kind: self.seat.kind } : null,
       push,

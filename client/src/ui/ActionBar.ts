@@ -18,6 +18,8 @@ export interface ActionHandlers {
   onPlayer: (id: number) => void;
   onFireChat: () => void;
   onUnfollow: () => void;
+  onFind: () => void;
+  onSecret: () => void;
 }
 
 interface Btn {
@@ -71,7 +73,8 @@ export class ActionBar {
   update(s: InteractState) {
     const H = this.handlers;
     let btns: Btn[] = [];
-    if (s.sliding) btns = [];
+    if (s.sliding || s.frozen) btns = [];
+    else if (s.findHost) btns = [{ id: 'find', label: '찾았다!!', kind: 'find', d: -99, run: () => H.onFind() }];
     else if (s.seated) {
       btns.push({ id: 'stand', label: STAND_LABEL[s.seated.kind] ?? '일어나기', kind: 'out', d: 0, run: () => H.onStand() });
       if (s.inFire) btns.push({ id: 'firechat', label: '모닥불 대화', kind: 'fire', d: 1, run: () => H.onFireChat() });
@@ -86,6 +89,7 @@ export class ActionBar {
       if (s.nearSlide !== null && !s.eating) btns.push({ id: 'slide', label: '미끄러지기', kind: 'slide', d: s.nearSlide, run: () => H.onSlide() });
       if (s.inFire && !s.seat) btns.push({ id: 'firechat', label: '대화 참여', kind: 'fire', d: 30, run: () => H.onFireChat() });
       if (s.player) btns.push({ id: `p:${s.player.id}`, label: `${s.player.name} 님`, kind: 'player', d: s.player.d + 8, run: () => H.onPlayer(s.player!.id) });
+      if (s.secret) btns.push({ id: 'secret', label: '반짝이는 무언가?', kind: 'secret', d: 2, run: () => H.onSecret() });
       if (s.following !== null) btns.push({ id: 'unfollow', label: '따라가기 그만', kind: 'out', d: 1, run: () => H.onUnfollow() });
       btns.sort((a, b) => a.d - b.d);
       btns = btns.slice(0, 3);

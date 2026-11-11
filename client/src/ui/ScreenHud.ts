@@ -193,7 +193,7 @@ export class ScreenHud {
     this.renderList();
   }
 
-  private toggleList() {
+  toggleList() {
     this.listPanel.classList.toggle('hidden');
     if (!this.listPanel.classList.contains('hidden')) {
       this.renderList();

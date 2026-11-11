@@ -20,9 +20,14 @@ import type {
   PlayerInfo,
   ServerToClientEvents,
 } from '../shared/protocol';
+import { EGG_BY_ID, EGG_IDS, EXPLORE_ZONES, type EggId } from '../shared/events';
+import { WORLD, zoneAt } from '../shared/map';
 import { TEAMS } from '../shared/social';
 import { BoardStore, type Author } from './BoardStore';
-import { PlazaRoom } from './rooms/PlazaRoom';
+import { EggStore } from './EggStore';
+import { HideSeek } from './HideSeek';
+import { PrizeStore } from './PrizeStore';
+import { PlazaRoom, type StatKey } from './rooms/PlazaRoom';
 import { SessionStore, type Session } from './sessions';
 import { SettingsStore } from './SettingsStore';
 import { parseAct, parseMove, sanitizeNote, sanitizeProfile, sanitizeText } from './validation';
@@ -51,6 +56,8 @@ const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 
 const board = new BoardStore(BOARD_FILE);
 const settings = new SettingsStore(path.join(DATA_DIR, 'settings.json'));
+const prizes = new PrizeStore(path.join(DATA_DIR, 'prizes.json'));
+const eggs = new EggStore(path.join(DATA_DIR, 'eggs.json'));
 const adminTokens = new Map<string, number>(); // token → 만료 시각
 
 function adminTokenValid(token: unknown): boolean {
@@ -129,6 +136,21 @@ app.get('/api/admin/export.csv', (req, res) => {
   res.send(board.toCSV());
 });
 
+// 이스터에그 기록 · 상품 당첨 기록 내보내기 (운영자만)
+for (const [route, name, csv] of [
+  ['/api/admin/eggs.csv', 'eggs', () => eggs.toCSV()],
+  ['/api/admin/prizes.csv', 'prizes', () => prizes.toCSV()],
+] as const) {
+  app.get(route, (req, res) => {
+    const t = String(req.get('authorization') ?? '').replace(/^Bearer /, '');
+    if (!adminTokenValid(t)) return res.status(401).send('운영자 로그인이 필요해요.');
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="jjak-azit-${name}-${stamp}.csv"`);
+    res.send(csv());
+  });
+}
+
 if (existsSync(CLIENT_DIR)) {
   app.use(
     '/assets',
@@ -185,9 +207,80 @@ plaza.hooks = {
     const s = sessions.byPlayer(playerId);
     return !!s && settings.isMuted(s.ownerKey);
   },
-  display: () => settings.data.display,
+  display: () => effectiveDisplay(),
   teamNames: () => settings.data.teamNames,
+  stat: (playerId, key) => eggStat(playerId, key),
 };
+
+// ------------------------------------------------------------------ 학회장을 찾아라!
+
+const hs = new HideSeek({
+  plaza,
+  prizes,
+  broadcast: (st) => {
+    io.to(plaza.channel).emit('hs', st);
+    // 운영자 화면(관전 소켓)에는 학회장 정보가 포함된 상태를 따로 보냄
+    for (const s of io.sockets.sockets.values()) if ((s as IOSocket).data.admin && !(s as IOSocket).data.token) s.emit('hs', hs.adminState());
+    // 학회장 본인은 자기가 학회장인 걸 알아야 함
+    if (hs.hostId !== null) plaza.hooks.emitTo(hs.hostId, 'hs', hs.adminState());
+  },
+  displayChanged: () => io.to(plaza.channel).emit('display', effectiveDisplay()),
+  notice: (text) => io.to(plaza.channel).emit('notice', text),
+  ownerKey: (id) => sessions.byPlayer(id)?.ownerKey ?? null,
+  isHostSession: (id) => !!sessions.byPlayer(id)?.admin,
+  log: (m) => log(m),
+});
+plaza.rules = hs;
+
+/** 운영자가 정한 화면 설정 + 숨바꼭질 중 강제 설정 (원래 설정은 그대로 보관 → 끝나면 자동 복원) */
+function effectiveDisplay(): DisplaySettings {
+  return hs.overrideDisplay(settings.data.display);
+}
+
+// ------------------------------------------------------------------ 이스터에그
+
+const STAT_EGG: Record<StatKey, EggId> = { swing: 'swing', sumung: 'sumung', dance: 'dance', prank: 'prank', secret: 'secret' };
+
+function eggStat(playerId: number, key: StatKey, n = 1) {
+  eggProgress(playerId, STAT_EGG[key], n);
+}
+
+function eggProgress(playerId: number, id: EggId, n: number) {
+  const s = sessions.byPlayer(playerId);
+  const info = plaza.get(playerId);
+  if (!s || !info || s.admin) return; // 학회장 계정은 최초 달성 경쟁에서 제외
+  if (eggs.add(s.ownerKey, id, n)) awardEgg(playerId, s, id);
+}
+
+function awardEgg(playerId: number, s: Session, id: EggId) {
+  const info = plaza.get(playerId);
+  if (!info) return;
+  const r = eggs.tryAward(id, s.ownerKey, info.nickname);
+  if (!r) return;
+  const def = EGG_BY_ID.get(id)!;
+  if (r.equipped) plaza.patch(playerId, { title: id });
+  const ev = { id, title: def.title, nickname: info.nickname, winnerId: playerId };
+  if (eggs.rec(id).broadcast) io.to(plaza.channel).emit('egg', ev);
+  else plaza.hooks.emitTo(playerId, 'egg', ev);
+  log(`이스터에그 최초 달성: ${info.nickname} — ${def.title}`);
+}
+
+// 1초마다: 온천·모닥불 체류 시간, 구역 방문 (서버 위치 기준)
+const campfire = WORLD.spots.campfire;
+setInterval(() => {
+  if (hs.active) return; // 숨바꼭질 중에는 집계하지 않음
+  for (const p of plaza.list()) {
+    if (p.status !== 'online') continue;
+    if (p.bath) eggProgress(p.id, 'spring', 1);
+    if (Math.hypot(p.x - campfire.x, p.y - campfire.y) <= 72) eggProgress(p.id, 'fire', 1);
+    const z = zoneAt(p.x, p.y);
+    const s = sessions.byPlayer(p.id);
+    if (z && s && !s.admin && EXPLORE_ZONES.includes(z.id) && eggs.rec('explorer').enabled && !eggs.rec('explorer').winner) {
+      if (eggs.visit(s.ownerKey, z.id) >= Math.min(eggs.rec('explorer').need, EXPLORE_ZONES.length)) awardEgg(p.id, s, 'explorer');
+    }
+  }
+}, 1000).unref();
+
 plaza.start();
 
 function ownerKeyFrom(uid: unknown): string {
@@ -208,8 +301,10 @@ function attach(socket: IOSocket, session: Session) {
   sessions.cancelGrace(session);
   session.socketId = socket.id;
   socket.data.token = session.token;
+  if (session.admin) socket.data.admin = true; // 학회장은 재접속해도 권한 유지
   socket.join(plaza.channel);
   plaza.setStatus(session.playerId, 'online');
+  hs.onHostBack(session.playerId);
 }
 
 function leave(socket: IOSocket) {
@@ -220,6 +315,7 @@ function leave(socket: IOSocket) {
   socket.leave(plaza.channel);
   if (!session) return;
   sessions.delete(token);
+  hs.onHostGone(session.playerId);
   plaza.removePlayer(session.playerId, 'left');
   log(`퇴장: ${session.nickname} (#${session.playerId})`);
 }
@@ -289,6 +385,8 @@ io.on('connection', (rawSocket) => {
       seat: null,
       followId: null,
       noPrank: false,
+      host: false,
+      title: eggs.equipped(ownerKey),
     };
     const session = sessions.create(randomUUID(), info.id, profile.nickname, ownerKey);
     plaza.addPlayer(info);
@@ -296,7 +394,7 @@ io.on('connection', (rawSocket) => {
     log(
       `입장: ${info.nickname} (#${info.id}, ${info.grade ? info.grade + '학년' : info.gradeText || '기타'} ${info.role === 'senior' ? '선배' : '후배'}) · 접속 ${plaza.onlineCount}명`,
     );
-    const res: JoinResult = { ok: true, selfId: info.id, token: session.token, room: plaza.snapshot(), muted: settings.isMuted(ownerKey) };
+    const res: JoinResult = { ok: true, selfId: info.id, token: session.token, room: plaza.snapshot(info.id), muted: settings.isMuted(ownerKey) };
     ack(res);
   });
 
@@ -306,14 +404,18 @@ io.on('connection', (rawSocket) => {
     const session = sessions.get(token);
     if (!session || !plaza.has(session.playerId)) return ack({ ok: false, reason: 'expired' });
     attach(socket, session);
-    ack({ ok: true, selfId: session.playerId, token: session.token, room: plaza.snapshot(), muted: settings.isMuted(session.ownerKey) });
+    const room = plaza.snapshot(session.playerId);
+    if (session.playerId === hs.hostId) room.hs = hs.adminState();
+    ack({ ok: true, selfId: session.playerId, token: session.token, room, muted: settings.isMuted(session.ownerKey) });
   });
 
   socket.on('spectate', (ack) => {
     if (typeof ack !== 'function') return;
     socket.data.spectator = true;
     socket.join(plaza.channel);
-    ack({ ok: true, room: plaza.snapshot() });
+    const room = plaza.snapshot(null);
+    if (socket.data.admin) room.hs = hs.adminState();
+    ack({ ok: true, room });
   });
 
   socket.on('m', (raw) => {
@@ -489,9 +591,129 @@ io.on('connection', (rawSocket) => {
     if (typeof ack !== 'function') return;
     if (!adminTokenValid(payload?.token)) return ack({ ok: false, reason: '운영자 로그인이 만료됐어요. 다시 로그인해주세요.' });
     socket.data.admin = true;
-    socket.data.spectator = true;
-    socket.join(plaza.channel);
+    const m = me(socket);
+    if (m) {
+      // 참가자 화면에서 로그인 = 학회장 아바타 (아바타 + 관리자 권한)
+      if (!m.session.admin) log(`학회장 로그인: ${m.info.nickname} (#${m.info.id})`);
+      m.session.admin = true;
+      if (!(hs.active && hs.hostId === m.info.id)) plaza.patch(m.info.id, { host: true, title: null });
+      if (hs.hostId === m.info.id) socket.emit('hs', hs.adminState());
+    } else {
+      socket.data.spectator = true;
+      socket.join(plaza.channel);
+      socket.emit('hs', hs.adminState());
+    }
     ack({ ok: true });
+  });
+
+  // ---------------------------------------------------------------- 학회장을 찾아라!
+
+  socket.on('hsFind', (ack) => {
+    if (typeof ack !== 'function') return;
+    const m = me(socket);
+    if (!m) return ack(NOT_IN);
+    const r = hs.find(m.session.playerId);
+    ack(r ? { ok: false, reason: r } : { ok: true });
+  });
+
+  socket.on('adminHs', (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    if (!isAdmin()) return ack(NO_AUTH);
+    const cmd = payload?.cmd;
+    let r: string | null = null;
+    if (cmd === 'start') {
+      // 참가자 화면에서 학회장 로그인한 사람이 시작하면 본인이 학회장, 운영자 페이지에서는 고른 학회장
+      const self = me(socket);
+      const hostId = self?.session.admin ? self.session.playerId : Number(payload?.hostId);
+      const sec = payload?.searchSec === undefined ? undefined : Number(payload.searchSec);
+      r = hs.start(hostId, sec);
+    } else if (cmd === 'end') hs.end();
+    else if (cmd === 'cancel') hs.cancel();
+    else if (cmd === 'reset') r = hs.reset();
+    else r = '알 수 없는 명령이에요.';
+    ack(r ? { ok: false, reason: r } : { ok: true });
+  });
+
+  socket.on('adminHsInfo', (ack) => {
+    if (typeof ack !== 'function') return;
+    if (!isAdmin()) return ack(NO_AUTH);
+    const hosts = sessions
+      .all()
+      .filter((s) => s.admin && plaza.has(s.playerId))
+      .map((s) => ({ id: s.playerId, nickname: plaza.get(s.playerId)!.nickname, online: plaza.get(s.playerId)!.status === 'online' }));
+    ack({ ok: true, state: hs.adminState(), hosts, hostId: hs.hostId });
+  });
+
+  // ---------------------------------------------------------------- 상품
+
+  socket.on('adminPrizes', (ack) => {
+    if (typeof ack !== 'function') return;
+    if (!isAdmin()) return ack(NO_AUTH);
+    ack(prizes.summary());
+  });
+
+  socket.on('adminPrizeSet', (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    if (!isAdmin()) return ack(NO_AUTH);
+    let r: string | null = '알 수 없는 요청이에요.';
+    if (payload?.op === 'paid') r = prizes.setPaid(Number(payload.awardId), !!payload.paid);
+    if (payload?.op === 'revoke') r = prizes.revoke(Number(payload.awardId));
+    if (payload?.op === 'alloc') {
+      const a = payload.alloc ?? {};
+      r = prizes.setAlloc(String(payload.itemId), Number(payload.total), {
+        hideseek: a.hideseek === undefined ? undefined : Number(a.hideseek),
+        draw: a.draw === undefined ? undefined : Number(a.draw),
+      });
+    }
+    if (!r) log(`상품 기록 변경: ${payload.op}`);
+    ack(r ? { ok: false, reason: r } : { ok: true });
+  });
+
+  // ---------------------------------------------------------------- 이스터에그 · 칭호
+
+  socket.on('myTitles', (ack) => {
+    if (typeof ack !== 'function') return;
+    const m = me(socket);
+    ack(m ? eggs.titlesOf(m.session.ownerKey) : { owned: [], equipped: null });
+  });
+
+  socket.on('setTitle', (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    const m = me(socket);
+    if (!m) return ack(NOT_IN);
+    const id = payload?.id ?? null;
+    if (id !== null && !EGG_IDS.includes(id)) return ack({ ok: false, reason: '알 수 없는 칭호예요.' });
+    const r = eggs.equip(m.session.ownerKey, id);
+    if (r) return ack({ ok: false, reason: r });
+    plaza.patch(m.info.id, { title: id });
+    ack({ ok: true });
+  });
+
+  socket.on('adminEggs', (ack) => {
+    if (typeof ack !== 'function') return;
+    if (!isAdmin()) return ack(NO_AUTH);
+    ack(eggs.adminRows());
+  });
+
+  socket.on('adminEggSet', (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    if (!isAdmin()) return ack(NO_AUTH);
+    const id = payload?.id;
+    if (!id || !EGG_IDS.includes(id)) return ack({ ok: false, reason: '이스터에그를 찾을 수 없어요.' });
+    if (payload.reset) {
+      const owner = eggs.reset(id);
+      // 칭호를 회수당한 참가자가 접속 중이면 이름표 갱신
+      if (owner)
+        for (const s of sessions.all()) if (s.ownerKey === owner && plaza.has(s.playerId)) plaza.patch(s.playerId, { title: eggs.equipped(owner) });
+      log(`이스터에그 기록 초기화: ${EGG_BY_ID.get(id)?.title}`);
+      return ack({ ok: true });
+    }
+    const r = eggs.set(id, {
+      enabled: typeof payload.enabled === 'boolean' ? payload.enabled : undefined,
+      need: payload.need === undefined ? undefined : Number(payload.need),
+      broadcast: typeof payload.broadcast === 'boolean' ? payload.broadcast : undefined,
+    });
+    ack(r ? { ok: false, reason: r } : { ok: true });
   });
 
   socket.on('adminPlayers', (ack) => {
@@ -546,7 +768,7 @@ io.on('connection', (rawSocket) => {
     for (const k of ['hideNames', 'hideTeams', 'hideBubbles', 'photo'] as (keyof DisplaySettings)[])
       if (typeof payload?.[k] === 'boolean') d[k] = payload[k]!;
     settings.save();
-    io.to(plaza.channel).emit('display', d);
+    io.to(plaza.channel).emit('display', effectiveDisplay());
     ack({ ok: true });
   });
 
@@ -598,7 +820,9 @@ io.on('connection', (rawSocket) => {
     session.socketId = null;
     plaza.releaseAll(session.playerId); // 좌석·놀이기구·따라가기 즉시 정리
     plaza.setStatus(session.playerId, 'away');
+    hs.onHostAway(session.playerId);
     sessions.startGrace(session, GRACE_MS, () => {
+      hs.onHostGone(session.playerId);
       plaza.removePlayer(session.playerId, 'timeout');
       log(`연결 종료: ${session.nickname} (#${session.playerId})`);
     });
@@ -625,6 +849,8 @@ function shutdown() {
   plaza.stop();
   board.flush();
   settings.flush();
+  prizes.flush();
+  eggs.flush();
   io.close();
   httpServer.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1500).unref();

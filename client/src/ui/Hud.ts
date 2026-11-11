@@ -19,7 +19,10 @@ import { CAMPFIRE_R } from '../../../shared/constants';
 import { WORLD as MAP } from '../../../shared/map';
 import { TEAMS, teamSvg, type InteractionId } from '../../../shared/social';
 import { teamName } from '../state/WorldStore';
-import type { Sheet } from './Sheet';
+import { Sheet } from './Sheet';
+import { EGG_BY_ID, HS, HS_PHASE_LABEL, type EggEvent, type MyTitles } from '../../../shared/events';
+import { chime } from './HideSeekUi';
+import { saveAdminToken } from './AdminPanel';
 
 /** 받침에 따라 을/를 */
 function objectParticle(word: string) {
@@ -78,6 +81,11 @@ export class Hud {
       onPlayer: (id) => this.openPlayer(id),
       onFireChat: () => this.chat.open('fire'),
       onUnfollow: () => this.net.socket.emit('unfollow'),
+      onFind: async () => {
+        const r = await this.net.req('hsFind');
+        if (!r.ok) this.toast(r.reason, 'info');
+      },
+      onSecret: () => this.act({ t: 'secret' }),
     });
     this.chat = new ChatBar(store, net, (open) => {
       document.body.classList.toggle('typing', open);
@@ -88,6 +96,12 @@ export class Hud {
     this.noticeEl = h('div', { class: 'notice hidden', role: 'alert' });
 
     const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+    this.hostBtn = h(
+      'button',
+      { class: 'icon-btn quick host hidden', type: 'button', 'aria-label': '학회장 메뉴', onclick: () => this.openHostSheet() },
+      h('span', { class: 'qi' }, '★'),
+      h('small', {}, '학회장'),
+    );
 
     this.el = h(
       'div',
@@ -114,6 +128,7 @@ export class Hud {
         { class: 'quickbar' },
         h('button', { class: 'icon-btn quick chat', type: 'button', 'aria-label': '채팅', onclick: () => this.chat.open() }, h('span', { class: 'qi' }, '말'), h('small', {}, '채팅')),
         h('button', { class: 'icon-btn quick emo', type: 'button', 'aria-label': '표정·동작', onclick: () => this.openEmotes() }, h('span', { class: 'qi' }, '^^'), h('small', {}, '표정')),
+        this.hostBtn,
       ),
       this.chat.mini,
       this.fireCard,
@@ -130,7 +145,7 @@ export class Hud {
     this.unsubs.push(
       store.on('count', (n) => {
         this.count.textContent = String(n);
-        this.refreshMenu();
+        if (this.menuTab !== 'me') this.refreshMenu(); // 내 캐릭터 탭은 입력 중일 수 있어 그대로 둠
       }),
       store.on('join', (p) => {
         if (p.id !== store.selfId) this.toast(`${p.nickname} ${roleLabel(p.role)}님이 아지트에 왔어요`, 'join');
@@ -141,7 +156,7 @@ export class Hud {
           'leave',
         ),
       ),
-      store.on('status', () => this.refreshMenu()),
+      store.on('status', () => this.menuTab !== 'me' && this.refreshMenu()),
       store.on('patch', (p) => {
         if (p.id === store.selfId) this.refreshMenu();
       }),
@@ -161,7 +176,180 @@ export class Hud {
         this.applyDisplay();
         if (this.prefs.noPrank) this.net.socket.emit('setPref', { noPrank: true });
       }),
+      store.on('egg', (ev) => this.onEgg(ev)),
+      store.on('hs', (st, prev) => {
+        this.renderHostSheet();
+        // 숨바꼭질이 시작되면 열린 메뉴·시트를 닫아 화면을 비움
+        if (st.phase === 'hiding' && prev.phase !== 'hiding') {
+          this.panel?.close();
+          this.closeMenu();
+          this.chat.close();
+        }
+      }),
     );
+  }
+
+  /** 학회장(운영자 인증) 계정이 되면 학회장 버튼 표시 */
+  setHostAccount(v: boolean) {
+    this.store.hostAccount = v;
+    this.hostBtn.classList.toggle('hidden', !v);
+    this.refreshMenu();
+  }
+
+  // -------------------------------------------------------------- 이스터에그
+
+  private onEgg(ev: EggEvent) {
+    if (ev.winnerId === this.store.selfId) {
+      const pop = h(
+        'div',
+        { class: 'egg-pop', style: `--ec:${EGG_BY_ID.get(ev.id)?.color ?? '#ffd84d'}` },
+        h('i', { class: 'egg-spark a' }),
+        h('i', { class: 'egg-spark b' }),
+        h('i', { class: 'egg-spark c' }),
+        h('small', {}, '숨겨진 업적 발견!'),
+        h('strong', {}, ev.title),
+        h('span', {}, '최초 달성자가 되었습니다!'),
+      );
+      this.el.append(pop);
+      chime([988, 1319, 1760], 0.07);
+      setTimeout(() => pop.classList.add('out'), 2800);
+      setTimeout(() => pop.remove(), 3300);
+      this.refreshMenu();
+    } else this.toast(`${ev.nickname} 님이 숨겨진 업적 ‘${ev.title}’의 최초 달성자가 됐어요!`, 'info');
+  }
+
+  // -------------------------------------------------------------- 학회장 메뉴 (숨바꼭질 진행)
+
+  private hostBtn: HTMLElement;
+  private hostSheet: Sheet | null = null;
+  private searchSec = HS.searchMs / 1000;
+
+  private openHostSheet() {
+    if (this.hostSheet?.isOpen) return;
+    this.actionBar.suspend(true);
+    this.hostSheet = new Sheet(this.el, '학회장 메뉴', () => {
+      this.actionBar.suspend(false);
+      this.hostSheet = null;
+    });
+    this.renderHostSheet();
+  }
+
+  private renderHostSheet() {
+    const sh = this.hostSheet;
+    if (!sh?.isOpen) return;
+    const st = this.store.hs;
+    const active = this.store.hsActive;
+    const sel = h(
+      'select',
+      { onchange: () => (this.searchSec = Number(sel.value)) },
+      ...[60, 90, 120, 180, 240, 300].map((s) => h('option', { value: String(s) }, `${s / 60 >= 1 && s % 60 === 0 ? `${s / 60}분` : `${s}초`}`)),
+    );
+    sel.value = String(this.searchSec);
+    const run = async (cmd: 'start' | 'end') => {
+      if (cmd === 'end' && !confirm('진행 중인 숨바꼭질을 종료할까요?')) return;
+      const r = await this.net.req('adminHs', { cmd, searchSec: this.searchSec });
+      if (!r.ok) this.toast(r.reason, 'info');
+      else if (cmd === 'start') sh.close();
+    };
+    sh.body.replaceChildren(
+      h(
+        'div',
+        { class: 'host-sheet' },
+        h('h3', {}, '학회장을 찾아라!'),
+        h('p', { class: 'host-state' }, h('b', {}, HS_PHASE_LABEL[st.phase]), st.round ? ` · ${st.round}회차` : '', st.winner && !active ? ` · 지난 우승: ${st.winner.nickname}` : ''),
+        active
+          ? h('button', { type: 'button', class: 'btn-danger', onclick: () => run('end') }, st.phase === 'found' || st.phase === 'timeout' ? '결과 연출 끝내기' : '숨바꼭질 강제 종료')
+          : h(
+              'div',
+              { class: 'host-start' },
+              h('label', {}, '수색 시간 ', sel),
+              h('button', { type: 'button', class: 'btn-primary', onclick: () => run('start') }, '숨바꼭질 시작'),
+            ),
+        h(
+          'ol',
+          { class: 'host-guide muted small' },
+          h('li', {}, '시작하면 다른 모든 화면이 15초 동안 가려지고, 내 위치는 서버가 아무에게도 보내지 않아요.'),
+          h('li', {}, '15초 안에 숨을 곳으로 이동하세요. 그 자리가 숨은 위치로 확정되고 움직일 수 없어요.'),
+          h('li', {}, '참가자는 중앙 광장에서 출발해요. 가장 먼저 옆에서 ‘찾았다!!’를 누른 한 명이 우승해요.'),
+          h('li', {}, '당첨·상품 지급 기록은 운영자 페이지(/admin)에서 확인할 수 있어요.'),
+        ),
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------- 학회장 로그인
+
+  private hostLoginView() {
+    if (this.store.hostAccount)
+      return h('p', { class: 'muted small host-on' }, '★ 학회장으로 로그인되어 있어요. 화면 오른쪽 ‘★ 학회장’ 버튼으로 숨바꼭질을 진행해요.');
+    const pw = h('input', { type: 'password', placeholder: '운영자 비밀번호', autocomplete: 'current-password' });
+    const msg = h('p', { class: 'muted small' });
+    return h(
+      'details',
+      { class: 'host-login' },
+      h('summary', {}, '학회장 로그인 (운영진 전용)'),
+      h(
+        'form',
+        {
+          class: 'row',
+          onsubmit: async (e) => {
+            e.preventDefault();
+            msg.textContent = '';
+            try {
+              const r = await fetch('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw.value }) });
+              const j = (await r.json()) as { ok: boolean; token?: string; expiresAt?: number; reason?: string };
+              if (!j.ok || !j.token) throw new Error(j.reason ?? '로그인에 실패했어요.');
+              saveAdminToken(j.token, j.expiresAt ?? Date.now() + 3600_000);
+              const a = await this.net.req('adminAuth', { token: j.token });
+              if (!a.ok) throw new Error(a.reason);
+              this.setHostAccount(true);
+              this.toast('학회장으로 로그인했어요.', 'info');
+            } catch (err) {
+              msg.textContent = (err as Error).message;
+            }
+          },
+        },
+        pw,
+        h('button', { type: 'submit', class: 'btn-primary small' }, '로그인'),
+      ),
+      msg,
+    );
+  }
+
+  // -------------------------------------------------------------- 칭호
+
+  private titlesView() {
+    const box = h('div', { class: 'titles' }, h('h3', {}, '내 칭호'), h('p', { class: 'muted small' }, '불러오는 중…'));
+    void this.net.req('myTitles').then((r) => {
+      const t = r as MyTitles;
+      if (!('owned' in t)) return;
+      const list = t.owned.length
+        ? h(
+            'div',
+            { class: 'title-list' },
+            ...t.owned.map((o) =>
+              h(
+                'button',
+                {
+                  type: 'button',
+                  class: `title-chip ${t.equipped === o.id ? 'on' : ''}`,
+                  style: `--ec:${EGG_BY_ID.get(o.id)?.color ?? '#ffd84d'}`,
+                  onclick: async () => {
+                    const next = t.equipped === o.id ? null : o.id;
+                    const res = await this.net.req('setTitle', { id: next });
+                    if (!res.ok) return this.toast(res.reason, 'info');
+                    box.replaceWith(this.titlesView());
+                  },
+                },
+                o.title,
+                h('small', {}, t.equipped === o.id ? '장착 중 · 눌러서 해제' : '눌러서 장착'),
+              ),
+            ),
+          )
+        : h('p', { class: 'muted small' }, '아직 칭호가 없어요. 아지트 곳곳에 숨겨진 업적을 가장 먼저 달성하면 특별한 칭호를 받아요!');
+      box.replaceChildren(h('h3', {}, '내 칭호'), list);
+    });
+    return box;
   }
 
   // -------------------------------------------------------------- 구역 안내
@@ -175,6 +363,7 @@ export class Hud {
     }
     this.zoneChip.replaceChildren(icon('pin'), h('span', {}, z.name));
     this.zoneChip.classList.remove('hidden');
+    if (this.store.hsActive) return; // 숨바꼭질 중에는 큰 구역 안내 카드를 띄우지 않음 (안내 배너와 겹침)
     this.zoneCard.replaceChildren(
       h('div', { class: 'zone-card-title' }, h('strong', {}, z.name), z.phase > 1 ? h('em', { class: `badge phase-${z.phase}` }, PHASE_TEXT[z.phase]) : null),
       h('p', {}, z.desc),
@@ -284,6 +473,7 @@ export class Hud {
     const t = this.store.players.get(id)?.info;
     const me = this.store.self;
     if (!t || !me || id === me.id) return;
+    if (this.store.hsActive) return; // 숨바꼭질 중에는 이름이 보이는 메뉴를 열지 않음
     const d = Math.hypot(t.x - me.x, t.y - me.y);
     if (d > 160) return this.toast(`${t.nickname} 님에게 조금 더 가까이 가주세요.`, 'info');
     if (this.panel?.isOpen) return;
@@ -568,6 +758,8 @@ export class Hud {
         ? h('p', { class: 'team-line', style: `--tc:${TEAMS[me.team].color}` }, h('i', { html: teamSvg(TEAMS[me.team].symbol, '#fff') }), `${teamName(this.store, me.team)} · 팀은 운영자가 바꿀 수 있어요`)
         : h('p', { class: 'muted small' }, '아직 팀이 없어요. 운영자가 배정해줄 거예요.'),
       h('p', { class: 'muted small' }, '새로고침하거나 잠깐 연결이 끊겨도 같은 캐릭터로 돌아올 수 있어요.'),
+      this.store.hostAccount ? null : this.titlesView(),
+      this.hostLoginView(),
     );
   }
 

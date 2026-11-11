@@ -510,6 +510,17 @@ export class Avatar {
     }
   }
 
+  /** 숨바꼭질: 관전 화면에서 숨은 학회장을 감춤 */
+  concealed = false;
+  setConcealed(v: boolean) {
+    if (this.concealed === v) return;
+    this.concealed = v;
+    this.sprite.setVisible(!v);
+    this.shadow.setVisible(!v && !this.bath);
+    this.ring?.setVisible(!v);
+    this.foodImg?.setVisible(!v);
+  }
+
   destroy() {
     this.cancelEat();
     this.clearPose();

@@ -1,0 +1,734 @@
+/* ================================================================
+   행사 이벤트: 운영자 메뉴 · 학회장을 찾아라! · 이스터에그·칭호
+   ================================================================ */
+
+/* ---------------------------------------------------------------- 운영자 패널 (열기/닫기) */
+.admin-root {
+  display: contents;
+}
+.stage-root.admin .admin-panel {
+  width: min(440px, 100vw);
+}
+.admin-panel.closed {
+  transform: translateX(105%);
+  box-shadow: none;
+  pointer-events: none;
+  visibility: hidden;
+  transition: transform 0.25s, visibility 0s 0.25s;
+}
+/* 패널 밖의 고정 버튼 — 패널이 접혀 있을 때 항상 화면 오른쪽 아래에 보임 */
+.admin-fab {
+  position: absolute;
+  bottom: calc(14px + var(--safe-b));
+  right: calc(14px + var(--safe-r));
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 3px solid var(--ink);
+  background: var(--lemon);
+  box-shadow: 0 4px 0 var(--ink);
+  font-family: var(--pixel-bold);
+  font-size: 13px;
+  color: var(--ink);
+}
+.admin-fab svg {
+  width: 16px;
+  height: 16px;
+}
+.admin-fab:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--ink);
+}
+.admin-head .admin-sec-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--pixel);
+  color: var(--ink-2);
+}
+.admin-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 2px solid var(--line);
+  background: var(--cream);
+}
+.admin-nav-btn {
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 9px;
+  border: 2px solid var(--ink);
+  background: #fff;
+  font-family: var(--pixel);
+  font-size: 12px;
+  color: var(--ink);
+}
+.admin-nav-btn.on {
+  background: var(--ink);
+  color: #fff;
+}
+.admin-nav-btn.live::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 4px;
+  border-radius: 2px;
+  background: var(--coral);
+  animation: blink 0.9s steps(2) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0.2;
+  }
+}
+.stage-root.admin .canvas-host,
+.stage-root.admin .screen-hud {
+  right: min(440px, 100vw);
+}
+.stage-root.admin.panel-collapsed .canvas-host,
+.stage-root.admin.panel-collapsed .screen-hud {
+  right: 0;
+}
+@media (max-width: 700px) {
+  /* 휴대폰: 패널이 화면을 덮고, 접으면 맵 전체가 보임 */
+  .stage-root.admin .canvas-host,
+  .stage-root.admin .screen-hud {
+    right: 0;
+  }
+  .stage-root.admin .admin-panel {
+    width: 100vw;
+    border-left: 0;
+  }
+}
+
+/* 대시보드 */
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.dash-card {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 10px;
+  border-radius: 12px;
+  border: 2px solid var(--ink);
+  background: #fff;
+  color: var(--ink);
+}
+.dash-card small {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.dash-card strong {
+  font-family: var(--pixel-bold);
+  font-weight: 400;
+  font-size: 18px;
+}
+.dash-card span {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.admin-body .row.wrap {
+  flex-wrap: wrap;
+}
+.admin-body .field {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.admin-body .field input,
+.admin-body .field select,
+.admin-eggs input {
+  height: 38px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 2px solid var(--ink);
+  font-size: 14px;
+  background: #fff;
+}
+.admin-body .warn {
+  margin: 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--lemon-l);
+  border: 2px dashed var(--ink-3);
+  font-size: 13px;
+}
+.host-tag {
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--lemon);
+  color: var(--ink);
+  font-style: normal;
+  font-size: 10px;
+  vertical-align: middle;
+}
+.admin-list.compact li {
+  font-size: 13px;
+}
+.admin-list .grow {
+  flex: 1;
+  min-width: 0;
+}
+.hs-state-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 3px solid var(--ink);
+  background: #fff;
+}
+.hs-state-card.phase-hiding,
+.hs-state-card.phase-searching {
+  background: var(--coral-l);
+}
+.hs-state-card.phase-found {
+  background: var(--lemon-l);
+}
+.hs-state-card div {
+  display: grid;
+}
+.hs-state-card small {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.hs-state-card strong {
+  font-family: var(--pixel-bold);
+  font-weight: 400;
+  font-size: 16px;
+}
+.hs-state-card span {
+  font-size: 11px;
+}
+.hs-start {
+  display: grid;
+  gap: 8px;
+}
+.host-guide {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 3px;
+}
+.admin-awards,
+.admin-eggs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.admin-awards li,
+.admin-eggs li {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #fff;
+  border: 2px solid var(--line);
+}
+.admin-awards li.paid {
+  border-color: var(--mint-d);
+  background: var(--mint-l);
+}
+.admin-awards p,
+.admin-eggs p {
+  margin: 0;
+  font-size: 13px;
+}
+.admin-awards small {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.aw-head,
+.egg-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.aw-head em,
+.egg-head em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--cream-2);
+}
+.egg-head em.won {
+  background: var(--lemon);
+}
+.admin-eggs li.off {
+  opacity: 0.55;
+}
+.admin-eggs .need {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+.admin-eggs .need input {
+  width: 72px;
+  height: 30px;
+}
+.egg-winner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+}
+.prize-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 2px solid var(--ink);
+  background: #fff;
+}
+.prize-card h3 {
+  margin: 0 !important;
+}
+
+/* ---------------------------------------------------------------- 참가자 HUD: 학회장·칭호 */
+.icon-btn.quick.host {
+  background: var(--lemon);
+}
+.host-sheet {
+  display: grid;
+  gap: 10px;
+}
+.host-sheet h3 {
+  margin: 0;
+}
+.host-state {
+  margin: 0;
+  font-size: 14px;
+}
+.host-start {
+  display: grid;
+  gap: 8px;
+}
+.host-start label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.host-start select {
+  height: 36px;
+  border-radius: 10px;
+  border: 2px solid var(--ink);
+  padding: 0 8px;
+  font-size: 14px;
+}
+.host-login {
+  margin-top: 6px;
+  font-size: 13px;
+}
+.host-login summary {
+  cursor: pointer;
+  color: var(--ink-2);
+}
+.host-login .row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.host-login input {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 2px solid var(--ink);
+  font-size: 14px;
+}
+.host-on {
+  margin-top: 6px;
+}
+.titles h3 {
+  margin: 12px 0 6px;
+}
+.title-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.title-chip {
+  display: grid;
+  gap: 1px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 2px solid var(--ink);
+  background: #fff;
+  font-family: var(--pixel-bold);
+  font-size: 13px;
+  color: var(--ink);
+  text-align: left;
+}
+.title-chip small {
+  font-family: var(--pixel);
+  font-size: 10px;
+  color: var(--ink-2);
+}
+.title-chip.on {
+  background: var(--ec);
+  box-shadow: 0 3px 0 var(--ink);
+}
+
+/* 이름표: 학회장 배지 · 칭호 배지 */
+.plate-host {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--lemon);
+  color: var(--ink);
+  font-family: var(--pixel-bold);
+  font-size: 10px;
+}
+.plate-title {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 2px);
+  transform: translateX(-50%);
+  padding: 0 5px;
+  border-radius: 5px;
+  border: 1px solid rgba(61, 48, 71, 0.9);
+  background: var(--ec);
+  color: var(--ink);
+  font-family: var(--pixel-bold);
+  font-size: 10px;
+  line-height: 13px;
+  white-space: nowrap;
+}
+.plate.stacked .plate-title {
+  display: none;
+}
+.world-overlay.hide-names .plate-title,
+body.hs-on .plate-title {
+  display: none;
+}
+
+/* 업적 팝업 */
+.egg-pop {
+  position: absolute;
+  left: 50%;
+  top: calc(84px + var(--safe-t));
+  transform: translateX(-50%);
+  z-index: 30;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 220px;
+  padding: 10px 18px 12px;
+  border-radius: 14px;
+  border: 3px solid var(--ink);
+  background: var(--paper);
+  box-shadow: 0 5px 0 var(--ink), 0 0 0 4px var(--ec) inset;
+  pointer-events: none;
+  animation: eggIn 0.35s steps(5);
+  transition: opacity 0.4s, transform 0.4s;
+}
+.egg-pop.out {
+  opacity: 0;
+  transform: translate(-50%, -12px);
+}
+.egg-pop small {
+  font-family: var(--pixel);
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.egg-pop strong {
+  font-family: var(--pixel-bold);
+  font-weight: 400;
+  font-size: 20px;
+}
+.egg-pop span {
+  font-size: 12px;
+}
+.egg-spark {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: var(--ec);
+  box-shadow: 0 0 0 2px #fff;
+  animation: spark 0.8s steps(3) infinite;
+}
+.egg-spark.a {
+  left: -8px;
+  top: 6px;
+}
+.egg-spark.b {
+  right: -6px;
+  top: -6px;
+  animation-delay: 0.25s;
+}
+.egg-spark.c {
+  right: 18px;
+  bottom: -8px;
+  animation-delay: 0.5s;
+}
+@keyframes spark {
+  50% {
+    transform: scale(0.4) rotate(45deg);
+    opacity: 0.4;
+  }
+}
+@keyframes eggIn {
+  from {
+    transform: translate(-50%, -20px) scale(0.7);
+    opacity: 0;
+  }
+}
+
+/* 액션 버튼 */
+.act-btn.find {
+  height: 72px !important;
+  padding: 0 26px !important;
+  font-size: 30px !important;
+  background: var(--coral);
+  color: #fff;
+  text-shadow: 0 3px 0 var(--coral-d);
+  animation: pop 0.22s ease-out, findPulse 0.7s ease-in-out infinite 0.3s;
+}
+@keyframes findPulse {
+  50% {
+    transform: scale(1.06);
+  }
+}
+.act-btn.secret.primary {
+  background: var(--lav-l);
+}
+
+/* ---------------------------------------------------------------- 학회장을 찾아라! */
+.hs-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 25;
+}
+.hs-layer > * {
+  pointer-events: auto;
+}
+.hs-blind {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: repeating-linear-gradient(45deg, #2c2234 0 14px, #33283c 14px 28px);
+  z-index: 2;
+}
+.hs-blind-card {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 24px 28px;
+  color: #fff;
+  text-align: center;
+}
+.hs-blind-card h2 {
+  margin: 0;
+  font-family: var(--pixel-bold);
+  font-weight: 400;
+  font-size: clamp(22px, 6vw, 44px);
+}
+.hs-blind-card p {
+  margin: 0;
+  font-size: clamp(14px, 3.2vw, 20px);
+  color: #e9dff0;
+}
+.hs-count {
+  margin-top: 8px;
+  font-family: var(--pixel-bold);
+  font-size: clamp(80px, 26vw, 200px);
+  line-height: 1;
+  color: var(--lemon);
+  text-shadow: 0 8px 0 #1b1420;
+}
+.hs-eyes {
+  display: flex;
+  gap: 18px;
+}
+.hs-eyes i {
+  width: 22px;
+  height: 22px;
+  background: #fff;
+  border-radius: 4px;
+  position: relative;
+  animation: peek 2.4s steps(1) infinite;
+}
+.hs-eyes i::after {
+  content: '';
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  left: 4px;
+  top: 7px;
+  background: #2c2234;
+  animation: look 2.4s steps(1) infinite;
+}
+@keyframes look {
+  50% {
+    left: 10px;
+  }
+}
+@keyframes peek {
+  90% {
+    height: 4px;
+    margin-top: 9px;
+  }
+}
+.hs-banner {
+  position: absolute;
+  left: 50%;
+  top: calc(10px + var(--safe-t));
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  border-radius: 12px;
+  border: 3px solid var(--ink);
+  background: var(--paper);
+  box-shadow: 0 4px 0 var(--ink);
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none !important;
+  z-index: 3;
+}
+.hs-banner b {
+  font-family: var(--pixel-bold);
+  font-weight: 400;
+  color: var(--coral-d);
+}
+.hs-banner .hs-time {
+  font-family: var(--pixel-bold);
+  font-size: 18px;
+}
+.hs-banner.urgent {
+  background: var(--coral);
+  color: #fff;
+}
+.hs-banner.urgent b {
+  color: #fff;
+}
+.stage-root.player .hs-banner {
+  top: calc(58px + var(--safe-t));
+}
+.stage-root.screen .hs-banner {
+  top: 122px;
+  font-size: 18px;
+  padding: 10px 22px;
+}
+.hs-splash {
+  position: absolute;
+  left: 50%;
+  top: 38%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  width: min(92vw, 720px);
+  text-align: center;
+  pointer-events: none !important;
+  z-index: 4;
+}
+.hs-splash strong {
+  font-family: var(--pixel-bold);
+  font-weight: 400;
+  font-size: clamp(26px, 7vw, 56px);
+  color: #fff;
+  -webkit-text-stroke: 2px var(--ink);
+  text-shadow: 0 5px 0 var(--ink);
+}
+.hs-splash p {
+  margin: 0;
+  padding: 4px 12px;
+  border-radius: 10px;
+  background: rgba(61, 48, 71, 0.85);
+  color: #fff;
+  font-size: clamp(13px, 3vw, 20px);
+}
+.hs-splash.big strong {
+  font-size: clamp(56px, 16vw, 130px);
+  color: var(--lemon);
+}
+.hs-splash.show {
+  animation: splashIn 0.45s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+@keyframes splashIn {
+  from {
+    transform: translate(-50%, -50%) scale(0.3);
+    opacity: 0;
+  }
+}
+.hs-result {
+  position: absolute;
+  left: 50%;
+  bottom: calc(18px + var(--safe-b));
+  transform: translateX(-50%);
+  z-index: 5;
+}
+.hs-result-card {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-width: min(86vw, 300px);
+  padding: 14px 22px 16px;
+  border-radius: 16px;
+  border: 3px solid var(--ink);
+  background: var(--paper);
+  box-shadow: 0 6px 0 var(--ink);
+  text-align: center;
+  animation: pop 0.3s ease-out;
+}
+.hs-result-card p {
+  margin: 0;
+}
+.hs-r-top {
+  font-family: var(--pixel-bold);
+  font-size: 16px;
+}
+.hs-r-label {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.hs-r-name {
+  font-family: var(--pixel-bold);
+  font-weight: 400;
+  font-size: 28px;
+}
+.hs-r-prize {
+  padding: 4px 12px;
+  border-radius: 10px;
+  background: #2ac1bc; /* 배민 민트 */
+  color: #fff;
+  font-family: var(--pixel-bold);
+  font-size: 15px;
+}
+.hs-r-note {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.stage-root.screen .hs-result-card {
+  transform: scale(1.4);
+  transform-origin: bottom center;
+}
+/* 숨바꼭질 중: 이름표·팀은 서버 설정으로 숨고, 참가자 메뉴 단서도 가림 */
+body.hs-on .plate-host {
+  display: none;
+}

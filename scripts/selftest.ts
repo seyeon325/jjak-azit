@@ -10,7 +10,8 @@
 import { randomUUID } from 'node:crypto';
 import { io, type Socket } from 'socket.io-client';
 import { WORLD } from '../shared/map';
-import type { ChatMessage, ClientToServerEvents, FxEvent, JoinResult, PlayerPatch, Profile, ServerToClientEvents } from '../shared/protocol';
+import type { EggAdminRow, HsState, MyTitles, PrizeSummary } from '../shared/events';
+import type { AdminHsInfo, ChatMessage, ClientToServerEvents, FxEvent, JoinResult, PlayerPatch, Profile, RoomSnapshot, ServerToClientEvents } from '../shared/protocol';
 import { densify, findPath } from './pathfind';
 
 const URL = process.argv[2] ?? 'http://localhost:3000';
@@ -343,6 +344,161 @@ check((await call(adm, 'adminDeleteNote', { id: p2.note.id })).ok, '운영자 �
 const csvNo = await fetch(`${URL}/api/admin/export.csv`);
 const csv = await fetch(`${URL}/api/admin/export.csv`, { headers: { Authorization: `Bearer ${login.token}` } });
 check(csvNo.status === 401 && csv.ok && (await csv.text()).includes('종류'), 'CSV 내보내기 (운영자만)');
+
+// ==================================================================== 학회장을 찾아라!
+section('2차 추가: 학회장을 찾아라! (숨바꼭질)');
+// 이전 점검에서 남은 숨바꼭질 당첨 기록 정리 (개발 서버 데이터)
+{
+  const sum = await call<PrizeSummary>(adm, 'adminPrizes');
+  for (const aw of sum.awards.filter((x) => x.pool === 'hideseek')) {
+    if (aw.paid) await call(adm, 'adminPrizeSet', { op: 'paid', awardId: aw.id, paid: false });
+    await call(adm, 'adminPrizeSet', { op: 'revoke', awardId: aw.id });
+  }
+}
+const host = await joinBot('학회장봇', { role: 'senior', grade: 4 });
+const hostBadge = waitFor<boolean>((dn) => observer.s.on('pu', (id, p) => id === host.id && p.host === true && dn(true)));
+check((await call(host.s, 'adminAuth', { token: login.token })).ok && !!(await hostBadge), '참가자 화면에서 학회장 로그인 → 학회장 배지');
+const info0 = await call<AdminHsInfo>(adm, 'adminHsInfo');
+check(info0.hosts.some((x) => x.id === host.id), '운영자 페이지에서 학회장 아바타 목록 확인');
+check(!(await call(far.s, 'adminHs', { cmd: 'start' })).ok, '일반 참가자는 숨바꼭질을 시작할 수 없음');
+
+// 관찰자에게 오는 학회장 위치 기록
+const leaks: string[] = [];
+let hiding = false;
+observer.s.on('s', (_t, st) => hiding && st.some((x) => x[0] === host.id) && leaks.push('s'));
+observer.s.on('pu', (id, p) => hiding && id === host.id && (p.x !== undefined || p.y !== undefined) && leaks.push('pu'));
+const hsSeen: HsState[] = [];
+observer.s.on('hs', (st) => hsSeen.push(st));
+const hidingSeen = waitFor<HsState>((dn) => observer.s.on('hs', (st) => st.phase === 'hiding' && dn(st)));
+const dispHidden = waitFor<boolean>((dn) => observer.s.on('display', (dd) => dn(dd.hideNames && dd.hideTeams)));
+hiding = true;
+check((await call(host.s, 'adminHs', { cmd: 'start', searchSec: 60 })).ok, '학회장이 숨바꼭질 시작');
+const hst = await hidingSeen;
+check(!!hst && hst.hostId === null, '숨는 단계: 참가자에게는 학회장이 누구인지도 보내지 않음');
+check(!!(await dispHidden), '숨바꼭질 중 닉네임·팀 표시 자동 숨김');
+check(!(await call(host.s, 'adminHs', { cmd: 'start' })).ok, '진행 중 중복 시작 방지');
+// 참가자는 움직일 수 없음
+const frozenCx = waitFor<boolean>((dn) => e.s.once('cx', () => dn(true)));
+e.s.emit('m', [e.pos.x + 3, e.pos.y, 3, 1]);
+check(!!(await frozenCx), '블라인드 중 참가자 이동은 서버가 막음');
+check(((await call(e.s, 'act', { t: 'slide' })) as { reason?: string }).reason === '학회장이 숨는 중이에요!', '블라인드 중 상호작용 제한');
+check(!(await call(e.s, 'chat', { ch: 'all', text: '어디야' })).ok, '블라인드 중 채팅 제한');
+// 학회장은 이동 (숨을 곳으로)
+const hideTarget = WORLD.collision.nearest(WORLD.spawn.x - 110, WORLD.spawn.y + 20, 40)!; // 광장 밖 (리스폰 위치와 충분히 떨어진 곳)
+const hostMoved = await walk(host, hideTarget.x, hideTarget.y);
+check(hostMoved, '학회장은 숨는 동안 이동 가능');
+await sleep(3300); // 3초마다 오는 전체 위치 보정에도 섞이지 않는지 확인
+check(leaks.length === 0, `숨는 동안 학회장 위치가 다른 참가자에게 전송되지 않음 (${leaks.length}건)`);
+const peek = (await call<JoinResult>(await connect(), 'spectate')) as unknown as { room: RoomSnapshot };
+const peekHost = peek.room.players.find((p) => p.id === host.id)!;
+check(Math.hypot(peekHost.x - host.pos.x, peekHost.y - host.pos.y) > 20, '관전·새로고침 스냅숏에도 숨은 위치 대신 출발 위치만 보임');
+check(!(await call(e.s, 'hsFind')).ok, '숨는 단계에는 발견 불가');
+
+const searchSeen = waitFor<HsState>((dn) => observer.s.on('hs', (st) => st.phase === 'searching' && dn(st)), 16000);
+const ePatched = waitFor<boolean>((dn) => e.s.on('pu', (id, p) => id === e.id && p.x !== undefined && dn(true)), 16000);
+const sst = await searchSeen;
+hiding = false;
+check(!!sst && sst.hostId === host.id, '15초 후 수색 시작 (서버 타이머) · 학회장 공개');
+const spawnRect = WORLD.spawn;
+check(!!(await ePatched) && e.pos.x >= spawnRect.x - 20 && e.pos.x <= spawnRect.x + spawnRect.w + 20 && e.pos.y >= spawnRect.y - 20 && e.pos.y <= spawnRect.y + spawnRect.h + 20, '참가자는 중앙 광장으로 리스폰');
+await sleep(200);
+const hostCx = waitFor<boolean>((dn) => host.s.once('cx', () => dn(true)));
+host.s.emit('m', [host.pos.x + 3, host.pos.y, 3, 1]);
+check(!!(await hostCx), '수색 중 학회장은 움직일 수 없음');
+check(!(await call(far.s, 'hsFind')).ok, '멀리서는 발견 불가 (서버 거리 검증)');
+check(!(await call(host.s, 'hsFind')).ok, '학회장 본인은 발견 요청 불가');
+// 두 참가자가 동시에 학회장 옆으로
+const near1 = WORLD.collision.nearest(host.pos.x - 10, host.pos.y + 4, 20)!;
+const near2 = WORLD.collision.nearest(host.pos.x + 10, host.pos.y + 4, 20)!;
+await Promise.all([walk(e, near1.x, near1.y), walk(d, near2.x, near2.y)]);
+const foundSeen = waitFor<HsState>((dn) => observer.s.on('hs', (st) => st.phase === 'found' && dn(st)));
+const [r1, r2, r3] = await Promise.all([call(e.s, 'hsFind'), call(d.s, 'hsFind'), call(e.s, 'hsFind')]);
+const oks = [r1, r2, r3].filter((r) => r.ok).length;
+check(oks === 1, `동시에 '찾았다!!' → 서버가 최초 1명만 인정 (성공 ${oks}건)`);
+const fst = await foundSeen;
+check(!!fst?.winner && fst.winner.prize && !!fst.reveal && !!fst.winnerPos, '발견 이벤트 + 학회장·발견자 위치 전달 (카메라 연출용)');
+const sum1 = await call<PrizeSummary>(adm, 'adminPrizes');
+const hsAwards = sum1.awards.filter((x) => x.pool === 'hideseek');
+check(hsAwards.length === 1 && hsAwards[0].itemName === '배달의민족 상품권' && hsAwards[0].nickname === fst!.winner!.nickname, '배달의민족 상품권 1장 당첨 기록 (서버 저장)');
+const bm = sum1.items.find((i) => i.id === 'baemin')!;
+check(bm.total === 4 && bm.alloc.hideseek === 1 && bm.alloc.draw === 3, '상품권 4장 = 숨바꼭질 1 + 랜덤 추첨 3');
+check(!(await call(e.s, 'hsFind')).ok, '우승 확정 후 추가 발견 요청 종료');
+const dispBack = waitFor<boolean>((dn) => observer.s.on('display', (dd) => dn(!dd.hideNames)));
+check((await call(adm, 'adminHs', { cmd: 'end' })).ok, '운영자 페이지에서 결과 연출 종료');
+check(!!(await dispBack), '종료 후 닉네임 표시 설정 복구');
+const badgeBack = (await call<JoinResult>(await connect(), 'spectate')) as unknown as { room: RoomSnapshot };
+check(badgeBack.room.players.find((p) => p.id === host.id)?.host === true && badgeBack.room.hs.phase === 'finished', '종료 후 학회장 배지 복구 · 결과 유지');
+
+// 2회차: 상품권은 다시 배정되지 않음
+const found2 = waitFor<HsState>((dn) => observer.s.on('hs', (st) => st.phase === 'found' && st.round === fst!.round + 1 && dn(st)), 30000);
+check((await call(adm, 'adminHs', { cmd: 'start', hostId: host.id, searchSec: 60 })).ok, '운영자 페이지에서 학회장을 골라 시작');
+await waitFor((dn) => observer.s.on('hs', (st) => st.phase === 'searching' && dn(true)), 17000);
+await sleep(300);
+const n3 = WORLD.collision.nearest(host.pos.x, host.pos.y + 10, 20)!;
+await walk(e, n3.x, n3.y);
+await call(e.s, 'hsFind');
+const f2 = await found2;
+const sum2 = await call<PrizeSummary>(adm, 'adminPrizes');
+check(!!f2 && f2.winner?.prize === false && sum2.awards.filter((x) => x.pool === 'hideseek').length === 1, '재시작해도 상품권 중복 배정 없음 (1장 유지)');
+await call(adm, 'adminHs', { cmd: 'end' });
+const aw = sum2.awards.find((x) => x.pool === 'hideseek')!;
+check((await call(adm, 'adminPrizeSet', { op: 'paid', awardId: aw.id, paid: true })).ok, '상품 지급 완료 기록');
+check(!(await call(adm, 'adminPrizeSet', { op: 'revoke', awardId: aw.id })).ok, '지급한 상품은 바로 취소 불가');
+check(!(await call(adm, 'adminPrizeSet', { op: 'alloc', itemId: 'baemin', total: 4, alloc: { hideseek: 1, draw: 4 } })).ok, '할당 합계가 전체 수량을 넘으면 거부');
+check(!(await call(far.s, 'adminPrizes')).ok, '일반 참가자는 상품 기록 조회 불가');
+// 3회차: 강제 종료
+const cancelSeen = waitFor<HsState>((dn) => observer.s.on('hs', (st) => st.phase === 'cancelled' && dn(st)));
+await call(adm, 'adminHs', { cmd: 'start', hostId: host.id, searchSec: 60 });
+await sleep(500);
+await call(adm, 'adminHs', { cmd: 'cancel' });
+check(!!(await cancelSeen), '강제 종료 (CANCELLED)');
+const moveAfter = waitFor<boolean>((dn) => {
+  const t = setTimeout(() => dn(true), 600);
+  e.s.once('cx', () => (clearTimeout(t), dn(false)));
+});
+e.s.emit('m', [e.pos.x, e.pos.y + 0.5, 0, 0]);
+check(!!(await moveAfter), '종료 후 이동 제한 해제');
+e.pos.y += 0.5;
+
+// ==================================================================== 이스터에그
+section('2차 추가: 이스터에그 · 칭호');
+await call(adm, 'adminEggSet', { id: 'secret', reset: true });
+await call(adm, 'adminEggSet', { id: 'secret', enabled: true, broadcast: true });
+const eggs0 = await call<EggAdminRow[]>(adm, 'adminEggs');
+check(eggs0.length === 8 && eggs0.every((x) => x.need > 0), '이스터에그 8종 · 조건값 설정');
+const secretSpot = WORLD.collision.nearest(WORLD.spots.secret.x, WORLD.spots.secret.y + 10, 30)!;
+check(!(await call(e.s, 'act', { t: 'secret' })).ok, '비밀 오브젝트는 가까이에서만');
+await walk(e, secretSpot.x, secretSpot.y);
+const eggSeen = waitFor<{ id: string; winnerId: number; title: string }>((dn) => observer.s.on('egg', (ev) => dn(ev)));
+check((await call(e.s, 'act', { t: 'secret' })).ok, '비밀 오브젝트 상호작용');
+const egg = await eggSeen;
+check(egg?.id === 'secret' && egg.winnerId === e.id && egg.title === '비밀 발견자', '최초 달성 → 칭호 지급 + 전체 알림');
+const titleSeen = (await call<JoinResult>(await connect(), 'spectate')) as unknown as { room: RoomSnapshot };
+check(titleSeen.room.players.find((p) => p.id === e.id)?.title === 'secret', '첫 칭호 자동 장착 → 이름표에 표시');
+await walk(d, secretSpot.x + 6, secretSpot.y);
+let second = false;
+observer.s.on('egg', (ev) => ev.id === 'secret' && (second = true));
+await call(d.s, 'act', { t: 'secret' });
+await sleep(400);
+check(!second, '같은 이스터에그 최초 달성자는 1명만');
+const mine = await call<MyTitles>(e.s, 'myTitles');
+check(mine.owned.some((o) => o.id === 'secret') && mine.equipped === 'secret', '보유 칭호 목록');
+check((await call(e.s, 'setTitle', { id: null })).ok && (await call(e.s, 'setTitle', { id: 'secret' })).ok, '칭호 해제·장착');
+check(!(await call(d.s, 'setTitle', { id: 'secret' })).ok, '얻지 못한 칭호는 장착 불가');
+await walk(host, secretSpot.x - 6, secretSpot.y);
+const eggs1 = await call<EggAdminRow[]>(adm, 'adminEggs');
+check(eggs1.find((x) => x.id === 'secret')?.winner?.nickname === '이봇', '운영자: 최초 달성자·시각 확인');
+const reEquip = waitFor<boolean>((dn) => observer.s.on('pu', (id, p) => id === e.id && 'title' in p && p.title === null && dn(true)));
+check((await call(adm, 'adminEggSet', { id: 'secret', reset: true })).ok && !!(await reEquip), '기록 초기화 → 칭호 회수 (해당 이스터에그만)');
+let hostEgg = false;
+observer.s.on('egg', (ev) => ev.winnerId === host.id && (hostEgg = true));
+await call(host.s, 'act', { t: 'secret' });
+await sleep(400);
+check(!hostEgg, '학회장 계정은 최초 달성 경쟁에서 제외');
+await call(adm, 'adminEggSet', { id: 'secret', need: 0 }).then((r) => check(!r.ok, '잘못된 조건값 거부'));
+const eggCsv = await fetch(`${URL}/api/admin/eggs.csv`, { headers: { Authorization: `Bearer ${login.token}` } });
+check(eggCsv.ok && (await eggCsv.text()).includes('비밀 발견자'), '획득 기록 CSV 내보내기');
+host.s.emit('leave');
 
 // ==================================================================== 정리
 section('정리');

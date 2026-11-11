@@ -883,9 +883,6 @@ body.typing .action-bar {
   transition: transform 0.25s;
   box-shadow: -6px 0 20px rgba(61, 48, 71, 0.2);
 }
-.admin-panel.collapsed {
-  transform: translateX(calc(100% - 54px));
-}
 .admin-head {
   display: flex;
   align-items: center;
@@ -1094,15 +1091,7 @@ body.typing .action-bar {
   font-weight: 700;
   text-align: center;
 }
-/* 운영자 패널이 열려 있으면 맵·관전 UI 를 패널 왼쪽 영역에 맞춤 */
-.stage-root.admin .canvas-host,
-.stage-root.admin .screen-hud {
-  right: min(380px, 92vw);
-}
-.stage-root.admin.panel-collapsed .canvas-host,
-.stage-root.admin.panel-collapsed .screen-hud {
-  right: 54px;
-}
+/* 운영자 패널 열림/접힘에 따른 맵 영역은 events.css */
 .admin-login .login-card {
   margin-top: 12vh;
 }

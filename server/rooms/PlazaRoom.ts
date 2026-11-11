@@ -1,6 +1,7 @@
 import { CAMPFIRE_R, EAT_MS, SEAT_RANGE, SLIDE_MS } from '../../shared/constants';
 import { SWING, SWING_OMEGA, swingAmp, swingAngle, swingSeatOffset, type SwingState } from '../../shared/playground';
 import { nearSpot, nearSpringEdge, randomSpawn, WORLD, type Seat } from '../../shared/map';
+import { HS_IDLE, type HsState } from '../../shared/events';
 import type {
   ActRequest,
   ActResult,
@@ -29,7 +30,42 @@ export interface PlazaHooks {
   isMuted(playerId: number): boolean;
   display(): DisplaySettings;
   teamNames(): string[];
+  /** 이스터에그용 행동 기록 (서버가 승인한 행동만) */
+  stat(playerId: number, key: StatKey, n?: number): void;
 }
+
+export type StatKey = 'swing' | 'sumung' | 'dance' | 'prank' | 'secret';
+
+/** 행사 이벤트(숨바꼭질 등)가 광장 규칙을 잠시 바꿀 때 쓰는 연결점 */
+export interface PlazaRules {
+  /** 이동 금지 (블라인드·발견 연출·수색 중 학회장) */
+  moveBlocked(id: number): boolean;
+  /** 위치를 방송하지 않을 참가자 */
+  hiddenId(): number | null;
+  /** 보는 사람에 따라 참가자 정보 가리기 */
+  mask(p: PlayerInfo, viewerId: number | null): PlayerInfo;
+  /** 음식·좌석·놀이기구 등 상호작용 금지 사유 */
+  actBlock(id: number): string | null;
+  /** 채팅·이모티콘·포즈 금지 사유 */
+  socialBlock(id: number): string | null;
+  /** 이 사람을 대상으로 한 상호작용 금지 사유 */
+  targetBlock(target: number): string | null;
+  state(): HsState;
+}
+
+const OPEN_RULES: PlazaRules = {
+  moveBlocked: () => false,
+  hiddenId: () => null,
+  mask: (p) => p,
+  actBlock: () => null,
+  socialBlock: () => null,
+  targetBlock: () => null,
+  state: () => HS_IDLE,
+};
+
+/** 그네를 이만큼 이상 타고 내려야 '탑승 완료' */
+const SWING_RIDE_MS = 2500;
+const DANCE_STAT_GAP = 1500;
 
 interface Req {
   id: number;
@@ -56,7 +92,11 @@ export class PlazaRoom extends Room {
   private nextReq = 1;
   private fireQ = FIRE_QUESTIONS[0];
   private fireQAt = 0;
+  /** 그네 탑승 시작 시각 (탑승 완료 횟수 집계) */
+  private swingSitAt = new Map<number, number>();
+  private lastDanceStat = new Map<number, number>();
   hooks!: PlazaHooks;
+  rules: PlazaRules = OPEN_RULES;
 
   constructor(io: IO) {
     super('plaza', io);
@@ -78,8 +118,54 @@ export class PlazaRoom extends Room {
     return this.sliding.has(id);
   }
 
+  protected override moveBlocked(id: number) {
+    return this.rules.moveBlocked(id);
+  }
+
+  protected override hiddenId() {
+    return this.rules.hiddenId();
+  }
+
+  protected override maskFor(p: PlayerInfo, viewerId: number | null) {
+    return this.rules.mask(p, viewerId);
+  }
+
   protected override extraSnapshot(): Omit<RoomSnapshot, 'roomId' | 'serverTime' | 'players'> {
-    return { swings: Object.fromEntries(this.swingSt), display: this.hooks.display(), teamNames: this.hooks.teamNames() };
+    return {
+      swings: Object.fromEntries(this.swingSt),
+      display: this.hooks.display(),
+      teamNames: this.hooks.teamNames(),
+      hs: this.rules.state(),
+    };
+  }
+
+  /** 숨바꼭질 수색 시작: 일반 참가자의 좌석·온천·따라가기 등을 풀고 지정 위치로 */
+  resetForEvent(id: number, to: { x: number; y: number }) {
+    const p = this.get(id);
+    if (!p) return;
+    this.releaseAll(id);
+    this.patch(id, { x: to.x, y: to.y, bath: false, seat: null, followId: null });
+  }
+
+  /** 숨기 시작 전 학회장 정리 (좌석·온천에서 나옴) */
+  freeHost(id: number) {
+    const p = this.get(id);
+    if (!p) return;
+    this.releaseAll(id);
+    if (p.bath) {
+      const land = WORLD.collision.nearest(p.x, p.y, 96) ?? randomSpawn();
+      this.patch(id, { bath: false, x: land.x, y: land.y });
+    }
+  }
+
+  /** 서버 위치를 직접 정함 (학회장 숨은 위치 확정 등) */
+  place(id: number, x: number, y: number) {
+    this.patch(id, { x, y });
+  }
+
+  /** 모두에게 포즈 연출 */
+  broadcastPose(id: number, kind: PoseId) {
+    if (this.has(id)) this.io.to(this.channel).emit('pose', id, kind, Date.now());
   }
 
   /** 퇴장·연결 끊김 시 좌석·따라가기·요청 정리 */
@@ -118,8 +204,17 @@ export class PlazaRoom extends Room {
     const p = this.get(id);
     if (!p) return { ok: false, reason: '아지트에 입장한 뒤 이용할 수 있어요.' };
     const busy = () => (p.seat ? '먼저 일어나 주세요.' : this.sliding.has(id) ? '미끄럼틀을 타는 중이에요.' : null);
+    const blocked = this.rules.actBlock(id);
+    if (blocked && !(req.t === 'stand' && !p.seat)) return { ok: false, reason: blocked };
 
     switch (req.t) {
+      case 'secret': {
+        if (!nearSpot(WORLD.spots.secret, p.x, p.y)) return { ok: false, reason: '조금 더 가까이 가주세요.' };
+        if (!this.cool(id, 'secret', 1500)) return { ok: true };
+        this.io.to(this.channel).emit('emote', id, 'star');
+        this.hooks.stat(id, 'secret');
+        return { ok: true };
+      }
       case 'food': {
         if (p.bath) return { ok: false, reason: '온천에서 나온 뒤 주문해주세요.' };
         if (p.eating) return { ok: false, reason: '지금 먹는 중이에요.' };
@@ -138,7 +233,10 @@ export class PlazaRoom extends Room {
         const rec = this.players.get(id)!;
         const t = setTimeout(() => {
           rec.timers = rec.timers.filter((x) => x !== t);
-          if (this.players.get(id) === rec) this.patch(id, { food: null, eating: false });
+          if (this.players.get(id) === rec) {
+            this.patch(id, { food: null, eating: false });
+            if (food === 'sumung') this.hooks.stat(id, 'sumung');
+          }
         }, EAT_MS);
         rec.timers.push(t);
         return { ok: true };
@@ -174,6 +272,7 @@ export class PlazaRoom extends Room {
         if (seat.kind === 'swing') {
           // 탑승: 지금 흔들리던 그네를 이어받아 살짝 구르기 시작
           const now = Date.now();
+          this.swingSitAt.set(id, now);
           const prev = this.swingSt.get(seat.id);
           const cur = swingAmp(prev, now, false);
           this.setSwing(seat.id, { amp: Math.max(cur, SWING.ridingMin), at: now, epoch: prev && cur > 0.02 ? prev.epoch : now });
@@ -224,6 +323,8 @@ export class PlazaRoom extends Room {
           // 퐁! — 지금 좌석이 있는 화면 위치에서 포물선으로 튀어나와 앞쪽에 착지
           const off = swingSeatOffset(swingAngle(st, now, true));
           this.seats.delete(seat.id);
+          this.endSwingRide(riderId);
+          this.hooks.stat(id, 'prank');
           const land =
             WORLD.collision.nearest(seat.x + (Math.random() * 24 - 12), seat.y + 46, 40) ??
             WORLD.collision.nearest(seat.x, seat.y + 20, 80) ??
@@ -251,9 +352,24 @@ export class PlazaRoom extends Room {
     if (!p?.seat) return;
     const seat = SEAT_BY_ID.get(p.seat);
     this.seats.delete(p.seat);
+    if (seat?.kind === 'swing') this.endSwingRide(id);
     const land = seat ? WORLD.collision.nearest(seat.x, seat.y + 12, 80) ?? randomSpawn() : { x: p.x, y: p.y };
     void broadcast;
     this.patch(id, { seat: null, x: land.x, y: land.y });
+  }
+
+  /** 그네에서 내릴 때: 충분히 탔으면 '탑승 완료' 1회 */
+  private endSwingRide(id: number) {
+    const at = this.swingSitAt.get(id);
+    this.swingSitAt.delete(id);
+    if (at !== undefined && Date.now() - at >= SWING_RIDE_MS) this.hooks.stat(id, 'swing');
+  }
+
+  private danceStat(id: number) {
+    const now = Date.now();
+    if (now - (this.lastDanceStat.get(id) ?? 0) < DANCE_STAT_GAP) return;
+    this.lastDanceStat.set(id, now);
+    this.hooks.stat(id, 'dance');
   }
 
   seatOf(id: number): Seat | null {
@@ -285,6 +401,8 @@ export class PlazaRoom extends Room {
     const p = this.get(id);
     if (!p) return { ok: false, reason: '아지트에 입장한 뒤 이용할 수 있어요.' };
     if (this.hooks.isMuted(id)) return { ok: false, reason: '운영자가 채팅을 잠시 제한했어요.' };
+    const blocked = this.rules.socialBlock(id);
+    if (blocked) return { ok: false, reason: blocked };
     const now = Date.now();
     const recent = (this.chatWindow.get(id) ?? []).filter((t) => now - t < 10_000);
     if (recent.length && now - recent[recent.length - 1] < 600) return { ok: false, reason: '조금 천천히 보내주세요.' };
@@ -314,6 +432,7 @@ export class PlazaRoom extends Room {
 
   emote(id: number, kind: EmoteId) {
     if (!EMOTES.includes(kind) || !this.has(id)) return;
+    if (this.rules.socialBlock(id)) return;
     if (!this.cool(id, 'emote', 500)) return;
     this.io.to(this.channel).emit('emote', id, kind);
   }
@@ -322,8 +441,10 @@ export class PlazaRoom extends Room {
     if (!(POSES as readonly string[]).includes(kind) || !this.has(id)) return;
     const p = this.get(id)!;
     if (p.seat || p.bath || this.sliding.has(id)) return;
+    if (this.rules.socialBlock(id) || this.rules.moveBlocked(id)) return;
     if (!this.cool(id, 'pose', 700)) return;
     this.io.to(this.channel).emit('pose', id, kind, Date.now());
+    if (kind === 'dance') this.danceStat(id);
   }
 
   // ---------------------------------------------------------------- 플레이어 대상 상호작용
@@ -333,6 +454,8 @@ export class PlazaRoom extends Room {
     const p = this.get(id);
     const t = this.get(target);
     if (!p || !t || id === target) return { ok: false, reason: '상대를 찾을 수 없어요.' };
+    const blocked = this.rules.socialBlock(id) ?? this.rules.actBlock(id) ?? this.rules.targetBlock(target);
+    if (blocked) return { ok: false, reason: blocked };
     if (t.status !== 'online') return { ok: false, reason: `${t.nickname} 님은 지금 연결이 끊겨 있어요.` };
     const def = INTERACTION_DEF[kind];
     if (Math.hypot(p.x - t.x, p.y - t.y) > def.range) return { ok: false, reason: '조금 더 가까이 가주세요.' };
@@ -355,6 +478,7 @@ export class PlazaRoom extends Room {
     }
     if (kind === 'greet') this.io.to(this.channel).emit('pose', id, 'wave', Date.now());
     this.io.to(this.channel).emit('fx', { kind, from: id, to: target, at: Date.now() });
+    if (def.prank) this.hooks.stat(id, 'prank');
     return { ok: true };
   }
 
@@ -380,6 +504,8 @@ export class PlazaRoom extends Room {
       const at = Date.now();
       this.io.to(this.channel).emit('pose', r.from, 'dance', at);
       this.io.to(this.channel).emit('pose', r.to, 'dance', at);
+      this.danceStat(r.from);
+      this.danceStat(r.to);
       return;
     }
     if (from.seat || from.bath) return;
