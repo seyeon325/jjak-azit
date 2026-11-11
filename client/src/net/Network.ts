@@ -2,7 +2,7 @@
  * Socket.IO 연결 래퍼.
  * - 자동 재연결 (Socket.IO 기본 기능)
  * - 세션 토큰 저장 → 새로고침/재연결 시 같은 캐릭터로 복귀
- * - 기기 키(uid) 저장 → 게시물·댓글 소유권과 운영자 팀 배정이 재접속 후에도 유지
+ * - 기기 키(uid) 저장 → 게시물·댓글 소유권과 학회장 팀 배정이 재접속 후에도 유지
  */
 import { io, type Socket } from 'socket.io-client';
 import type { ClientToServerEvents, JoinResult, MoveInput, Profile, ServerToClientEvents, SpectateResult } from '../../../shared/protocol';

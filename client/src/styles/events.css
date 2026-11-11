@@ -732,3 +732,67 @@ body.hs-on .plate-title {
 body.hs-on .plate-host {
   display: none;
 }
+
+/* 학회장 메뉴: 우수 PAIR · 행운 추첨 · 레이드 */
+.pair-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.pair-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 2px solid var(--line);
+  background: #fff;
+}
+.pair-card.done {
+  border-color: var(--mint-d);
+  background: var(--mint-l);
+}
+.pair-card.live {
+  box-shadow: 0 0 0 3px var(--lemon);
+}
+.pair-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.pair-head em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 12px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--cream-2);
+}
+.pair-card input,
+.pair-card select {
+  height: 34px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 2px solid var(--ink);
+  font-size: 14px;
+  background: #fff;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.chip {
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: var(--cream-2);
+  font-size: 12px;
+}
+.chip.senior {
+  background: var(--coral-l);
+}
+.chip.junior {
+  background: var(--mint-l);
+}

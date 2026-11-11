@@ -1,0 +1,428 @@
+/* ================================================================
+   빔프로젝터 무대 (우수 PAIR 경품 가챠 · 오늘의 행운 추첨) — 1920×1080 기준
+   ================================================================ */
+.stage-show {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 40%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 60%),
+    repeating-linear-gradient(45deg, #fdf3df 0 24px, #f9ead0 24px 48px);
+}
+.stage-root.admin .stage-show {
+  right: min(440px, 100vw);
+}
+.stage-root.admin.panel-collapsed .stage-show {
+  right: 0;
+}
+@media (max-width: 700px) {
+  .stage-root.admin .stage-show {
+    right: 0;
+  }
+}
+.st-board {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1920px;
+  height: 1080px;
+  transform: translate(-50%, -50%) scale(0.5);
+  transform-origin: center;
+  color: var(--ink);
+  font-family: var(--pixel-bold);
+}
+.px-img {
+  image-rendering: pixelated;
+  display: block;
+}
+.st-head {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 36px;
+  text-align: center;
+}
+.st-event {
+  display: inline-block;
+  margin: 0;
+  padding: 6px 22px;
+  border-radius: 14px;
+  border: 4px solid var(--ink);
+  background: var(--lemon);
+  box-shadow: 0 6px 0 var(--ink);
+  font-size: 30px;
+}
+.st-head h1 {
+  margin: 18px 0 0;
+  font-weight: 400;
+  font-size: 92px;
+  line-height: 1.1;
+  color: #fff;
+  -webkit-text-stroke: 4px var(--ink);
+  paint-order: stroke;
+  text-shadow: 0 8px 0 var(--ink);
+}
+.st-sub {
+  margin: 20px 0 0;
+  font-size: 36px;
+  color: var(--ink-2);
+}
+.st-sub2 {
+  position: absolute;
+  top: 300px;
+  left: 0;
+  right: 0;
+  margin: 0;
+  text-align: center;
+  font-size: 40px;
+}
+.st-foot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 54px;
+  margin: 0;
+  text-align: center;
+  font-size: 58px;
+  color: var(--coral-d);
+}
+.st-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  border: 4px solid var(--ink);
+  background: var(--tc);
+  flex: none;
+}
+.st-badge svg {
+  width: 30px;
+  height: 30px;
+}
+.st-card-team {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  font-size: 54px;
+  text-align: center;
+}
+.st-card-team.big {
+  font-size: 72px;
+}
+.st-members {
+  margin: 6px 0 0;
+  font-family: var(--pixel);
+  font-size: 32px;
+  color: var(--ink-2);
+  text-align: center;
+}
+.st-team {
+  position: absolute;
+  top: 250px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 760px;
+  padding: 18px 40px 22px;
+  border-radius: 24px;
+  border: 5px solid var(--ink);
+  background: var(--paper);
+  box-shadow: 0 8px 0 var(--ink);
+  text-align: center;
+}
+.st-team small {
+  font-size: 28px;
+  color: var(--coral-d);
+}
+/* 가챠 기계 */
+.gacha-stage {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 480px;
+  height: 560px;
+}
+.gacha {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 384px;
+  height: 504px;
+  margin-left: -192px;
+}
+.gacha .body {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.gacha-balls {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 384px;
+  height: 230px;
+  clip-path: ellipse(132px 110px at 192px 128px);
+}
+.gacha .ball {
+  position: absolute;
+}
+.gacha .handle {
+  position: absolute;
+  left: 93px;
+  top: 285px;
+}
+.gacha-out {
+  position: absolute;
+  left: 216px;
+  top: 300px;
+  width: 96px;
+  height: 96px;
+}
+.gacha-out canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.gacha.idle .body {
+  animation: gachaIdle 2.4s ease-in-out infinite;
+}
+.gacha.turn .handle {
+  animation: gachaTurn 0.8s steps(8) 1;
+}
+.gacha.shake .body,
+.gacha.shake .gacha-balls {
+  animation: gachaShake 0.14s steps(2) infinite;
+}
+.gacha.shake .ball {
+  animation: gachaSwirl 0.6s steps(6) infinite;
+}
+.gacha-out .drop {
+  animation: capsuleDrop 0.4s steps(4) 1;
+}
+.gacha-out .silhouette {
+  left: -40px;
+  top: -150px;
+  animation: silUp 0.5s steps(5) 1 both;
+}
+@keyframes gachaIdle {
+  50% {
+    transform: translateY(-6px);
+  }
+}
+@keyframes gachaTurn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes gachaShake {
+  0% {
+    transform: translate(-5px, 0);
+  }
+  100% {
+    transform: translate(5px, -2px);
+  }
+}
+@keyframes gachaSwirl {
+  0% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(24px, -20px);
+  }
+  50% {
+    transform: translate(0, -36px);
+  }
+  75% {
+    transform: translate(-24px, -16px);
+  }
+}
+@keyframes capsuleDrop {
+  from {
+    transform: translateY(-60px);
+  }
+}
+@keyframes silUp {
+  from {
+    transform: translateY(40px) scale(0.5);
+    opacity: 0;
+  }
+}
+.st-remain {
+  position: absolute;
+  left: 120px;
+  top: 30px;
+  width: 440px;
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+  border-radius: 20px;
+  border: 4px solid var(--ink);
+  background: rgba(255, 250, 240, 0.9);
+  box-shadow: 0 6px 0 var(--ink);
+}
+.st-remain small {
+  font-size: 28px;
+  color: var(--ink-2);
+}
+.st-remain-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-family: var(--pixel);
+  font-size: 30px;
+}
+.st-remain-item canvas {
+  flex: none;
+}
+/* 결과 */
+.st-result {
+  position: absolute;
+  /* 16:9 보드 밖(위아래 여백)까지 어둡게 덮음 */
+  inset: -1200px;
+  display: grid;
+  place-items: center;
+  background: rgba(61, 48, 71, 0.45);
+  z-index: 3;
+}
+.st-result.hidden {
+  display: none;
+}
+.st-result-card {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  min-width: 900px;
+  padding: 40px 60px 120px;
+  position: relative;
+  border-radius: 32px;
+  border: 6px solid var(--ink);
+  background: var(--paper);
+  box-shadow: 0 12px 0 var(--ink);
+  animation: stPop 0.45s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+.st-result-card .st-foot {
+  bottom: 30px;
+}
+.st-kicker {
+  margin: 0;
+  padding: 6px 26px;
+  border-radius: 14px;
+  background: var(--coral);
+  color: #fff;
+  font-size: 40px;
+}
+.st-card-icon {
+  display: grid;
+  place-items: center;
+  min-height: 220px;
+}
+.st-card-icon.small {
+  min-height: 0;
+}
+.st-prize-name {
+  font-weight: 400;
+  font-size: 46px;
+  text-align: center;
+}
+.st-prize-name.big {
+  font-size: 76px;
+  color: var(--coral-d);
+}
+.px-img.pop {
+  animation: stPop 0.6s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+@keyframes stPop {
+  from {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+}
+/* 카드 3장 (가챠 결과 · 행운 당첨자) */
+.st-cards {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 350px;
+  display: flex;
+  justify-content: center;
+  gap: 56px;
+}
+.st-card {
+  width: 520px;
+  min-height: 500px;
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  gap: 10px;
+  padding: 30px 26px;
+  border-radius: 28px;
+  border: 5px solid var(--ink);
+  background: var(--paper);
+  box-shadow: 0 10px 0 var(--ink);
+}
+.st-card.empty {
+  align-content: center;
+  background: rgba(255, 250, 240, 0.7);
+  border-style: dashed;
+  box-shadow: none;
+  font-size: 40px;
+  color: var(--ink-2);
+}
+.st-card.winner .st-card-team {
+  font-size: 56px;
+}
+.st-card.pop {
+  animation: stPop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+.st-avatar {
+  min-height: 220px;
+  display: grid;
+  place-items: end center;
+}
+.st-card.rolling {
+  align-content: center;
+  background: var(--lemon-l);
+}
+.st-roll-name {
+  font-size: 64px;
+  text-align: center;
+}
+.st-count {
+  margin-top: 20px;
+  font-size: 140px;
+  color: var(--coral-d);
+  -webkit-text-stroke: 3px var(--ink);
+  paint-order: stroke;
+}
+/* 꽃가루 (짧게, 번쩍임 없이) */
+.st-confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 4;
+}
+.st-confetti .piece {
+  position: absolute;
+  top: -40px;
+  width: 16px;
+  height: 24px;
+  animation: stFall linear 1 forwards;
+}
+@keyframes stFall {
+  to {
+    transform: translateY(1160px) rotate(540deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .st-confetti {
+    display: none;
+  }
+  .gacha.shake .body,
+  .gacha.shake .gacha-balls,
+  .gacha.shake .ball {
+    animation: none !important;
+  }
+}

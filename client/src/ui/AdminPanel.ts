@@ -1,7 +1,7 @@
 /**
- * 운영자 페이지 (/admin)
+ * 학회장 페이지 (/admin)
  *  - 비밀번호 로그인 → 서버가 발급한 토큰으로 소켓 권한 확인 (비밀번호는 클라이언트 코드에 없음)
- *  - 오른쪽 패널 + 항상 보이는 '운영자 메뉴' 버튼 (패널을 접어도 버튼은 화면에 남음)
+ *  - 오른쪽 패널 + 항상 보이는 '학회장 메뉴' 버튼 (패널을 접어도 버튼은 화면에 남음)
  *  - 메뉴는 SECTIONS 목록 하나로 관리 → 3차(랜덤 추첨·레이드·시상식)는 항목만 추가하면 됨
  *
  * [이전 오류 원인] 접기 버튼이 패널 머리줄 오른쪽 끝에 있었는데, 접으면 패널이 오른쪽으로 밀려나
@@ -9,8 +9,9 @@
  * → 열기/닫기 버튼을 패널 밖의 고정 버튼으로 분리하고, 열림 상태는 한 곳(open)에서만 관리합니다.
  */
 import { gradeLabel } from '../../../shared/foods';
-import { HS, HS_PHASE_LABEL, hsActive, POOL_LABEL, type EggAdminRow, type PrizePool, type PrizeSummary } from '../../../shared/events';
-import type { AdminHsInfo, AdminNote, AdminPlayer, DisplaySettings } from '../../../shared/protocol';
+import { HS, HS_PHASE_LABEL, hsActive, POOL_LABEL, type EggAdminRow, type LuckyInfo, type PairInfo, type PairTeam, type PrizePool, type PrizeSummary } from '../../../shared/events';
+import type { RaidAdminInfo } from '../../../shared/raid';
+import type { AdminHsInfo, AdminNote, AdminPlayer, ClientToServerEvents, DisplaySettings } from '../../../shared/protocol';
 import { TEAMS, teamSvg } from '../../../shared/social';
 import type { Network } from '../net/Network';
 import type { WorldStore } from '../state/WorldStore';
@@ -47,7 +48,7 @@ export function clearAdminToken() {
 /** 로그인 화면. 성공하면 토큰을 돌려줌 */
 export function adminLogin(app: HTMLElement): Promise<string> {
   return new Promise((resolve) => {
-    const pw = h('input', { type: 'password', placeholder: '운영자 비밀번호', autocomplete: 'current-password' });
+    const pw = h('input', { type: 'password', placeholder: '학회장 비밀번호', autocomplete: 'current-password' });
     const msg = h('p', { class: 'login-msg' });
     const btn = h('button', { type: 'submit', class: 'btn-primary' }, '로그인');
     const el = h(
@@ -78,7 +79,7 @@ export function adminLogin(app: HTMLElement): Promise<string> {
             }
           },
         },
-        h('header', { class: 'login-head' }, logoMark('logo-mark big'), h('h1', {}, '운영자 페이지'), h('p', {}, '짝선짝후 아지트 관리')),
+        h('header', { class: 'login-head' }, logoMark('logo-mark big'), h('h1', {}, '학회장 페이지'), h('p', {}, '짝선짝후 아지트 관리')),
         h('section', { class: 'step' }, h('div', { class: 'nick-field' }, pw)),
         btn,
         msg,
@@ -90,20 +91,23 @@ export function adminLogin(app: HTMLElement): Promise<string> {
   });
 }
 
-type SectionId = 'dash' | 'people' | 'board' | 'notice' | 'camera' | 'photo' | 'hs' | 'awards' | 'eggs' | 'prizes' | 'settings';
+type SectionId = 'dash' | 'people' | 'board' | 'notice' | 'camera' | 'photo' | 'hs' | 'pair' | 'lucky' | 'raid' | 'awards' | 'eggs' | 'prizes' | 'settings';
 
-/** 메뉴 목록 (3차: 'draw' 랜덤 추첨 · 'raid' 과제 괴물 · 'ceremony' 시상식을 여기에 추가) */
+/** 메뉴 목록 (메뉴 추가는 여기에 한 줄 + views 에 화면 하나) */
 const SECTIONS: { id: SectionId; label: string; short: string }[] = [
   { id: 'dash', label: '대시보드', short: '대시보드' },
   { id: 'people', label: '접속자 관리', short: '접속자' },
   { id: 'board', label: '메시지 게시판 관리', short: '게시판' },
   { id: 'notice', label: '전체 공지', short: '공지' },
-  { id: 'camera', label: '관전 카메라', short: '카메라' },
+  { id: 'camera', label: '관전 카메라 · 빔프로젝터 화면', short: '카메라' },
   { id: 'photo', label: '단체 사진 모드', short: '단체 사진' },
   { id: 'hs', label: '학회장을 찾아라!', short: '숨바꼭질' },
-  { id: 'awards', label: '숨바꼭질 당첨 · 상품 지급 기록', short: '당첨 기록' },
+  { id: 'pair', label: '우수 PAIR 경품 가챠', short: 'PAIR 가챠' },
+  { id: 'lucky', label: '오늘의 행운은 누구에게? (배민 3명)', short: '행운 추첨' },
+  { id: 'raid', label: '과제 괴물을 물리쳐라! (레이드)', short: '레이드' },
+  { id: 'awards', label: '당첨 · 상품 지급 기록', short: '당첨 기록' },
   { id: 'eggs', label: '이스터에그 관리', short: '이스터에그' },
-  { id: 'prizes', label: '상품 관리', short: '상품' },
+  { id: 'prizes', label: '상품 재고 관리', short: '상품' },
   { id: 'settings', label: '설정', short: '설정' },
 ];
 
@@ -122,6 +126,10 @@ export class AdminPanel {
   private hsInfo: AdminHsInfo | null = null;
   private prizes: PrizeSummary | null = null;
   private eggs: EggAdminRow[] = [];
+  private pair: PairInfo | null = null;
+  private lucky: LuckyInfo | null = null;
+  private raidInfo: RaidAdminInfo | null = null;
+  private teamDraft: PairTeam[] | null = null;
   private refreshTimer = 0;
   private liveTimer = 0;
   private searchSec = HS.searchMs / 1000;
@@ -135,15 +143,15 @@ export class AdminPanel {
     private onLogout: () => void,
   ) {
     this.body = h('div', { class: 'admin-body' });
-    this.nav = h('nav', { class: 'admin-nav', 'aria-label': '운영자 메뉴' });
+    this.nav = h('nav', { class: 'admin-nav', 'aria-label': '학회장 메뉴' });
     this.titleEl = h('span', { class: 'admin-sec-title' });
     this.panel = h(
       'aside',
-      { class: 'admin-panel', 'aria-label': '운영자 패널' },
+      { class: 'admin-panel', 'aria-label': '학회장 패널' },
       h(
         'div',
         { class: 'admin-head' },
-        h('b', {}, '운영자'),
+        h('b', {}, '학회장'),
         this.titleEl,
         h('button', { type: 'button', class: 'icon-btn small', 'aria-label': '패널 접기', title: '패널 접기 (A)', onclick: () => this.setOpen(false) }, icon('close')),
       ),
@@ -151,14 +159,19 @@ export class AdminPanel {
       this.body,
     );
     // 패널 밖에 있는 고정 버튼: 접혀 있을 때 언제든 다시 열 수 있음
-    this.fab = h('button', { type: 'button', class: 'admin-fab hidden', 'aria-label': '운영자 메뉴 열기', onclick: () => this.setOpen(true) }, icon('menu'), h('span', {}, '운영자 메뉴'));
+    this.fab = h('button', { type: 'button', class: 'admin-fab hidden', 'aria-label': '학회장 메뉴 열기', onclick: () => this.setOpen(true) }, icon('menu'), h('span', {}, '학회장 메뉴'));
     this.el = h('div', { class: 'admin-root' }, this.panel, this.fab);
 
     const later = () => {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = window.setTimeout(() => this.refresh(), 400);
     };
-    for (const ev of ['join', 'leave', 'status', 'patch', 'reset', 'hs', 'egg'] as const) store.on(ev, later);
+    for (const ev of ['join', 'leave', 'status', 'patch', 'reset', 'hs', 'egg', 'stage'] as const) store.on(ev, later);
+    // 레이드 상태는 초당 10번 오므로 단계가 바뀔 때만 다시 그림
+    store.on('raid', (st, prev) => {
+      if (st.phase !== prev.phase || st.paused !== prev.paused || st.joined.length !== prev.joined.length || st.shown !== prev.shown) later();
+      for (const el of this.body.querySelectorAll<HTMLElement>('[data-raid-live]')) el.textContent = this.raidLive();
+    });
     for (const ev of ['note', 'noteUpdate', 'noteDelete', 'comment', 'commentDelete'] as const)
       store.on(ev, () => (this.section === 'board' || this.section === 'dash') && later());
     store.on('display', () => (this.section === 'photo' || this.section === 'dash') && this.render());
@@ -242,6 +255,30 @@ export class AdminPanel {
           if (Array.isArray(r)) this.eggs = r;
         }),
       );
+    if (s === 'pair' || s === 'dash')
+      tasks.push(
+        this.net.req('adminPairInfo').then((r) => {
+          if (r && 'teams' in r) this.pair = r;
+        }),
+      );
+    if (s === 'lucky' || s === 'dash')
+      tasks.push(
+        this.net.req('adminLuckyInfo').then((r) => {
+          if (r && 'candidates' in r) this.lucky = r;
+        }),
+      );
+    if (s === 'raid' || s === 'dash')
+      tasks.push(
+        this.net.req('adminRaidInfo').then((r) => {
+          if (r && 'lobby' in r) this.raidInfo = r;
+        }),
+      );
+    if (s === 'lucky' || s === 'pair')
+      tasks.push(
+        this.net.req('adminPrizes').then((r) => {
+          if (r && 'items' in r) this.prizes = r;
+        }),
+      );
     await Promise.all(tasks);
     this.renderNav();
     this.render();
@@ -268,6 +305,9 @@ export class AdminPanel {
       camera: () => this.cameraView(),
       photo: () => this.photoView(),
       hs: () => this.hsView(),
+      pair: () => this.pairView(),
+      lucky: () => this.luckyView(),
+      raid: () => this.raidView(),
       awards: () => this.awardsView(),
       eggs: () => this.eggsView(),
       prizes: () => this.prizesView(),
@@ -303,10 +343,13 @@ export class AdminPanel {
           baemin ? `숨바꼭질 ${baemin.used.hideseek}/${baemin.alloc.hideseek} · 추첨 ${baemin.used.draw}/${baemin.alloc.draw}` : '',
           'prizes',
         ),
+        card('우수 PAIR 가챠', this.pair ? `${Object.keys(this.pair.assigned).length} / 3팀` : '-', this.pair ? `남은 상품 ${this.pair.remaining.length}종` : '', 'pair'),
+        card('행운 추첨', this.lucky ? `${this.lucky.used} / ${this.lucky.alloc}명` : '-', this.lucky ? `지금 대상 ${this.lucky.candidates.length}명` : '', 'lucky'),
+        card('레이드', { off: '대기 전', lobby: '대기실', countdown: '시작 중', battle: '전투 중', victory: '승리', defeat: '실패', awards: '시상식' }[this.store.raid.phase], this.raidInfo ? `지난 레이드 ${this.raidInfo.history.length}회` : '', 'raid'),
         card('게시판', `${this.notes.length}개`, '쪽지', 'board'),
         card('화면 표시', this.store.display.photo ? '단체 사진 중' : '평소', this.store.display.hideNames ? '닉네임 숨김' : '닉네임 표시', 'photo'),
       ),
-      h('p', { class: 'muted small' }, '카드를 누르면 해당 메뉴로 이동해요. 패널은 오른쪽 위 ✕ 또는 A 키로 접고, ‘운영자 메뉴’ 버튼으로 다시 열 수 있어요.'),
+      h('p', { class: 'muted small' }, '카드를 누르면 해당 메뉴로 이동해요. 패널은 오른쪽 위 ✕ 또는 A 키로 접고, ‘학회장 메뉴’ 버튼으로 다시 열 수 있어요.'),
     );
   }
 
@@ -458,6 +501,10 @@ export class AdminPanel {
       b('자유 카메라 (3) · 끌어서 이동, 휠로 확대', () => this.hud.cam('free')),
       b('참가자 추적 목록 열기 (L)', () => this.hud.toggleList()),
       h('p', { class: 'muted small' }, '특정 참가자는 ‘접속자 관리’의 추적 버튼으로도 따라갈 수 있어요. 숨바꼭질 수색 중에는 관전 화면에 숨은 학회장이 보이지 않아요.'),
+      h('h3', {}, '빔프로젝터 전용 화면'),
+      b('관객용 화면 새 창으로 열기 (/screen)', () => window.open('/screen', 'azit-screen')),
+      b('무대 화면(가챠·추첨) 닫기', () => void this.call('adminStage', { op: 'clear' })),
+      h('p', { class: 'muted small' }, '관객용 화면에는 학회장 버튼이 없어요. 가챠·추첨·레이드 장면은 여기서 조작하면 관객용 화면에 바로 반영돼요. 관객용 화면 오른쪽 아래 ‘소리’ 버튼(S 키)으로 효과음을 켜고 끌 수 있어요.'),
     );
   }
 
@@ -573,6 +620,300 @@ export class AdminPanel {
             ),
           )
         : h('p', { class: 'muted small' }, '아직 진행한 회차가 없어요.'),
+    );
+  }
+
+  // -------------------------------------------------------------- 우수 PAIR 경품 가챠
+
+  private pairView() {
+    const info = this.pair;
+    if (!info) return h('p', { class: 'muted' }, '불러오는 중…');
+    const teams = (this.teamDraft ??= info.teams.map((t) => ({ ...t })));
+    const st = this.store.stage;
+    const cmd = async (payload: Parameters<ClientToServerEvents['adminPair']>[0], msg?: string) => {
+      if (await this.call('adminPair', payload)) {
+        if (msg) this.say(msg);
+        this.refresh();
+      }
+    };
+    const cards = teams.map((t, i) => {
+      const a = info.assigned[t.id];
+      const name = h('input', { type: 'text', maxlength: 24, value: t.name, placeholder: `우수 PAIR ${i + 1} 팀 이름`, oninput: () => (t.name = name.value) });
+      const members = h('input', { type: 'text', maxlength: 80, value: t.members, placeholder: '팀원 (예: 홍길동, 김선배)', oninput: () => (t.members = members.value) });
+      const badge = h(
+        'select',
+        { onchange: () => (t.badge = Number(badge.value)) },
+        h('option', { value: '-1' }, '심볼 없음'),
+        ...TEAMS.map((tm) => h('option', { value: String(tm.id) }, `${tm.defaultName} 색·심볼`)),
+      );
+      badge.value = String(t.badge);
+      const onStage = st.mode === 'gacha' && st.team.id === t.id;
+      return h(
+        'li',
+        { class: `pair-card ${a ? 'done' : ''} ${onStage ? 'live' : ''}` },
+        h('div', { class: 'pair-head' }, h('b', {}, `우수 PAIR ${i + 1}`), h('em', {}, a ? `추첨 완료 · ${a.itemName}` : '미추첨')),
+        name,
+        members,
+        badge,
+        h(
+          'div',
+          { class: 'row wrap' },
+          !a ? h('button', { type: 'button', class: 'mini-btn', onclick: () => cmd({ op: 'select', teamId: t.id }, '무대에 팀을 띄웠어요.') }, '무대에 띄우기') : null,
+          !a
+            ? h(
+                'button',
+                {
+                  type: 'button',
+                  class: 'mini-btn on',
+                  onclick: () => cmd({ op: 'draw', teamId: t.id }),
+                },
+                '가챠 시작',
+              )
+            : null,
+          a
+            ? h(
+                'button',
+                {
+                  type: 'button',
+                  class: `mini-btn ${a.paid ? '' : 'on'}`,
+                  onclick: async () => {
+                    if (await this.call('adminPrizeSet', { op: 'paid', awardId: a.awardId, paid: !a.paid })) this.refresh();
+                  },
+                },
+                a.paid ? '지급 취소' : '지급 완료로 표시',
+              )
+            : null,
+          a
+            ? h(
+                'button',
+                {
+                  type: 'button',
+                  class: 'mini-btn danger',
+                  onclick: () => {
+                    if (confirm(`${t.name || '이 팀'}의 '${a.itemName}' 배정을 취소하고 다시 추첨할까요?\n취소한 상품은 남은 후보로 돌아가고, 재추첨 이력이 남아요.`)) void cmd({ op: 'redraw', teamId: t.id }, '배정을 취소했어요. 다시 가챠를 시작할 수 있어요.');
+                  },
+                },
+                '재추첨',
+              )
+            : null,
+        ),
+      );
+    });
+    return h(
+      'div',
+      { class: 'admin-screen' },
+      h('p', { class: 'muted small' }, '이미 선정된 공식 우수 PAIR 3팀에게 상품 3종을 하나씩 무작위로 배정해요. 게임 팀과는 별개예요. 팀 이름·팀원은 실제 자료로 입력해주세요.'),
+      h('ul', { class: 'pair-list' }, ...cards),
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'btn-secondary',
+          onclick: async () => {
+            (document.activeElement as HTMLElement | null)?.blur();
+            if (await this.call('adminPair', { op: 'save', teams })) {
+              this.teamDraft = null;
+              this.say('우수 PAIR 팀 정보를 저장했어요.');
+              this.refresh();
+            }
+          },
+        },
+        '팀 정보 저장',
+      ),
+      h('h3', {}, `남은 상품 ${info.remaining.length}종`),
+      h('p', { class: 'small' }, info.remaining.length ? info.remaining.map((r) => r.name).join(' · ') : '모든 상품을 배정했어요.'),
+      h(
+        'div',
+        { class: 'row wrap' },
+        h('button', { type: 'button', class: 'btn-primary small', onclick: () => cmd({ op: 'summary' }, '전체 결과를 무대에 띄웠어요.') }, '전체 결과 공개'),
+        h('button', { type: 'button', class: 'btn-secondary small', onclick: () => this.call('adminStage', { op: 'clear' }) }, '무대 화면 닫기'),
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'btn-danger small',
+            onclick: () => {
+              if (confirm('우수 PAIR 가챠 결과를 모두 취소하고 처음부터 다시 할까요?\n(지급 완료로 표시한 상품이 있으면 초기화되지 않아요)')) void cmd({ op: 'reset' }, '가챠를 초기화했어요.');
+            },
+          },
+          '전체 초기화',
+        ),
+      ),
+      h('p', { class: 'muted small' }, "'가챠 시작'을 누르는 순간 서버가 상품을 확정·저장하고, 빔프로젝터는 확정된 결과를 약 4초 연출로 공개해요. 다음 팀은 원하는 때에 누르면 돼요."),
+      h('h3', {}, '최근 이력'),
+      info.log.length
+        ? h(
+            'ul',
+            { class: 'admin-list compact' },
+            ...info.log
+              .slice(-8)
+              .reverse()
+              .map((l) => h('li', {}, h('span', { class: 'grow' }, `${{ draw: '추첨', redraw: '재추첨(취소)', reset: '초기화(취소)', paid: '지급' }[l.action]} · ${l.teamName} → ${l.itemName}`), h('small', {}, time(l.at)))),
+          )
+        : h('p', { class: 'muted small' }, '아직 이력이 없어요.'),
+    );
+  }
+
+  // -------------------------------------------------------------- 오늘의 행운은 누구에게?
+
+  private luckyView() {
+    const info = this.lucky;
+    if (!info) return h('p', { class: 'muted' }, '불러오는 중…');
+    const st = this.store.stage;
+    const drawnOnStage = st.mode === 'lucky' && st.phase === 'drawn';
+    const cmd = async (op: 'ready' | 'draw' | 'reveal' | 'summary') => {
+      if (await this.call('adminLucky', { op })) this.refresh();
+    };
+    const ex = h('input', {
+      type: 'checkbox',
+      onchange: async () => {
+        await this.call('adminLucky', { op: 'exclude', value: ex.checked });
+        this.refresh();
+      },
+    });
+    ex.checked = info.excludeHsWinner;
+    const winners = (this.prizes?.awards ?? []).filter((a) => a.pool === 'draw');
+    return h(
+      'div',
+      { class: 'admin-screen' },
+      h('div', { class: 'hs-state-card' }, h('div', {}, h('small', {}, '랜덤 추첨 할당'), h('strong', {}, `${info.alloc}장`)), h('div', {}, h('small', {}, '배정됨 / 남음'), h('strong', {}, `${info.used} / ${info.need}`)), h('div', {}, h('small', {}, '지금 추첨 대상'), h('strong', {}, `${info.candidates.length}명`))),
+      h('label', { class: 'toggle' }, ex, h('span', {}, '숨바꼭질 당첨자는 추첨 대상에서 제외')),
+      h('p', { class: 'muted small' }, '대상: 지금 접속 중인 일반 참가자 (학회장·관전 화면 제외, 같은 기기는 한 번만, 이미 당첨된 사람 제외)'),
+      h('div', { class: 'chips' }, ...info.candidates.slice(0, 60).map((c) => h('span', { class: 'chip' }, c.nickname))),
+      h(
+        'div',
+        { class: 'row wrap' },
+        h('button', { type: 'button', class: 'btn-secondary small', onclick: () => cmd('ready') }, '무대에 띄우기'),
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'btn-primary small',
+            disabled: info.need < 1 || info.candidates.length < info.need,
+            onclick: () => {
+              if (confirm(`추첨 대상 ${info.candidates.length}명 중 ${info.need}명을 뽑을까요?\n누르는 순간 당첨자가 확정·저장돼요.`)) void cmd('draw');
+            },
+          },
+          `추첨 시작 (${info.need}명)`,
+        ),
+        drawnOnStage && st.revealed < st.winners.length
+          ? h('button', { type: 'button', class: 'btn-primary small', onclick: () => cmd('reveal') }, `${st.revealed + 1}번째 당첨자 공개`)
+          : null,
+        h('button', { type: 'button', class: 'btn-secondary small', onclick: () => cmd('summary') }, '당첨자 전체 보기'),
+        h('button', { type: 'button', class: 'btn-secondary small', onclick: () => this.call('adminStage', { op: 'clear' }) }, '무대 화면 닫기'),
+      ),
+      info.need > 0 && info.candidates.length < info.need ? h('p', { class: 'warn' }, `추첨 대상이 ${info.candidates.length}명이라 ${info.need}명을 뽑을 수 없어요. 참가자가 더 접속하면 시작할 수 있어요.`) : null,
+      h('h3', {}, '당첨자'),
+      winners.length
+        ? h(
+            'ul',
+            { class: 'admin-awards' },
+            ...winners.map((a) =>
+              h(
+                'li',
+                { class: a.paid ? 'paid' : '' },
+                h('div', { class: 'aw-head' }, h('b', {}, a.nickname), h('em', {}, a.paid ? '지급 완료' : '미지급')),
+                h('small', {}, `당첨 ${time(a.at)} · 참가자 #${a.playerId}`),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    class: `mini-btn ${a.paid ? '' : 'on'}`,
+                    onclick: async () => {
+                      if (await this.call('adminPrizeSet', { op: 'paid', awardId: a.id, paid: !a.paid })) this.refresh();
+                    },
+                  },
+                  a.paid ? '지급 취소' : '지급 완료로 표시',
+                ),
+              ),
+            ),
+          )
+        : h('p', { class: 'muted small' }, '아직 당첨자가 없어요.'),
+    );
+  }
+
+  // -------------------------------------------------------------- 과제 괴물 레이드
+
+  private raidLive() {
+    const r = this.store.raid;
+    if (r.phase === 'off') return '-';
+    const left = r.endsAt ? Math.max(0, Math.ceil((r.endsAt - this.store.serverNow()) / 1000)) : 0;
+    const phase = { off: '', lobby: '대기실', countdown: '카운트다운', battle: `${r.stage}페이즈`, victory: '승리', defeat: '실패', awards: '시상식' }[r.phase];
+    return `${phase}${r.paused ? ' (일시정지)' : ''} · 보스 ${r.boss.hp}/${r.boss.max}${r.boss.shield ? ' (방어막)' : ''} · 남은 ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} · 전투 ${r.players.length}명`;
+  }
+
+  private raidView() {
+    const r = this.store.raid;
+    const info = this.raidInfo;
+    const cmd = async (op: Parameters<ClientToServerEvents['adminRaid']>[0]['op'], ask?: string) => {
+      if (ask && !confirm(ask)) return;
+      if (await this.call('adminRaid', { op })) this.refresh();
+    };
+    const b = (label: string, op: Parameters<ClientToServerEvents['adminRaid']>[0]['op'], cls = 'btn-secondary small', ask?: string) =>
+      h('button', { type: 'button', class: cls, onclick: () => cmd(op, ask) }, label);
+    const ctrl: (HTMLElement | null)[] = [];
+    if (r.phase === 'off') ctrl.push(b('대기실 열기 (모두에게 초대장)', 'open', 'btn-primary small'));
+    if (r.phase === 'lobby') ctrl.push(b(`전투 시작 (${r.joined.length}명)`, 'start', 'btn-primary small'), b('대기실 닫기', 'close'));
+    if (r.phase === 'countdown' || r.phase === 'battle')
+      ctrl.push(r.paused ? b('재개', 'resume', 'btn-primary small') : b('일시정지', 'pause'), b('강제 종료', 'stop', 'btn-danger small', '레이드를 강제 종료할까요? 지금까지 기록은 저장돼요.'));
+    if (r.phase === 'victory' || r.phase === 'defeat') ctrl.push(b('특별 시상식 시작', 'awards', 'btn-primary small'), b('재시작 (같은 인원)', 'reset', 'btn-secondary small', '같은 인원으로 다시 시작할까요?'), b('아지트 복귀', 'close'));
+    if (r.phase === 'awards')
+      ctrl.push(
+        r.shown < r.awards.length ? b(`다음 수상자 공개 (${r.shown + 1}/${r.awards.length})`, 'next', 'btn-primary small') : null,
+        r.shown > 0 ? b('이전', 'prev') : null,
+        b('전체 수상 결과', 'allAwards'),
+        b('시상식 끝내고 아지트 복귀', 'close', 'btn-danger small'),
+      );
+    const stats = (info?.stats ?? []).slice().sort((a, x) => x.damage - a.damage);
+    return h(
+      'div',
+      { class: 'admin-screen' },
+      h('div', { class: `hs-state-card phase-${r.phase === 'battle' ? 'searching' : r.phase}` }, h('div', {}, h('small', {}, '레이드 상태'), h('strong', { 'data-raid-live': '1' }, this.raidLive()))),
+      h('div', { class: 'row wrap' }, ...ctrl),
+      r.phase === 'lobby' || r.phase === 'off'
+        ? h(
+            'div',
+            {},
+            h('h3', {}, `대기실 ${info?.lobby.length ?? 0}명`),
+            h('div', { class: 'chips' }, ...(info?.lobby ?? []).map((p) => h('span', { class: `chip ${p.role}` }, p.nickname))),
+          )
+        : null,
+      h(
+        'ol',
+        { class: 'muted small host-guide' },
+        h('li', {}, '대기실을 열면 참가자 화면에 초대장이 떠요. ‘참여하기’를 누른 사람만 전투에 들어가요. (학회장 계정은 제외)'),
+        h('li', {}, '보스 체력은 실제 참가 인원에 맞춰 정해져요. 제한 시간 4분 30초.'),
+        h('li', {}, '빔프로젝터(/screen)에는 전투 화면이 자동으로 떠요.'),
+      ),
+      r.phase === 'awards' || r.phase === 'victory' || r.phase === 'defeat'
+        ? h(
+            'div',
+            {},
+            h('h3', {}, '특별 칭호 (전투 기록 기준)'),
+            h('ul', { class: 'admin-list compact' }, ...r.awards.map((a, i) => h('li', { class: i < r.shown ? '' : 'away' }, h('b', {}, a.title), h('span', { class: 'grow' }, a.nickname), h('small', {}, a.value)))),
+          )
+        : null,
+      stats.length
+        ? h(
+            'div',
+            {},
+            h('h3', {}, '전투 통계 (데미지 순)'),
+            h(
+              'ul',
+              { class: 'admin-list compact' },
+              ...stats.slice(0, 12).map((s) => h('li', {}, h('b', {}, s.nickname), h('span', { class: 'grow' }, `데미지 ${s.damage} · 회피 ${s.evades} · 쓰러짐 ${s.downs} · 부활 ${s.revives} · 협동 ${s.coop}`))),
+            ),
+          )
+        : null,
+      h('button', { type: 'button', class: 'btn-secondary', onclick: () => this.download('/api/admin/raid.csv', 'raid') }, '레이드 결과 CSV 내려받기'),
+      info?.history.length
+        ? h(
+            'div',
+            {},
+            h('h3', {}, '지난 레이드'),
+            h('ul', { class: 'admin-list compact' }, ...info.history.slice().reverse().map((x) => h('li', {}, h('b', {}, x.victory ? '승리' : '실패'), h('span', { class: 'grow' }, `${x.players}명 · ${Math.round(x.timeMs / 1000)}초`), h('small', {}, time(x.at))))),
+          )
+        : null,
     );
   }
 

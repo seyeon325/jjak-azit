@@ -1,5 +1,7 @@
 import type { Server } from 'socket.io';
 import { MOVE_SPEED, TICK_HZ } from '../../shared/constants';
+import { STAGE_IDLE } from '../../shared/events';
+import { RAID_IDLE } from '../../shared/raid';
 import type {
   ClientToServerEvents,
   LeaveReason,
@@ -92,6 +94,8 @@ export class Room {
       display: { hideNames: false, hideTeams: false, hideBubbles: false, photo: false },
       teamNames: [],
       hs: { phase: 'ready', round: 0, hostId: null, endsAt: 0, searchMs: 0, paused: false, leftMs: 0, winner: null, reveal: null, winnerPos: null },
+      stage: STAGE_IDLE,
+      raid: RAID_IDLE,
     };
   }
 

@@ -10,9 +10,10 @@
 import { randomUUID } from 'node:crypto';
 import { io, type Socket } from 'socket.io-client';
 import { WORLD } from '../shared/map';
-import type { EggAdminRow, HsState, MyTitles, PrizeSummary } from '../shared/events';
+import type { EggAdminRow, HsState, LuckyInfo, MyTitles, PairInfo, PrizeSummary, StageState } from '../shared/events';
 import type { AdminHsInfo, ChatMessage, ClientToServerEvents, FxEvent, JoinResult, PlayerPatch, Profile, RoomSnapshot, ServerToClientEvents } from '../shared/protocol';
 import { densify, findPath } from './pathfind';
+import { RAID, type RaidAdminInfo, type RaidFx, type RaidState } from '../shared/raid';
 
 const URL = process.argv[2] ?? 'http://localhost:3000';
 const ADMIN_PW = process.env.ADMIN_PASSWORD ?? 'azit-dev';
@@ -347,6 +348,7 @@ check(csvNo.status === 401 && csv.ok && (await csv.text()).includes('종류'), '
 
 // ==================================================================== 학회장을 찾아라!
 section('2차 추가: 학회장을 찾아라! (숨바꼭질)');
+await call(adm, 'adminRaid', { op: 'close' }); // 이전 점검에서 남은 레이드 정리
 // 이전 점검에서 남은 숨바꼭질 당첨 기록 정리 (개발 서버 데이터)
 {
   const sum = await call<PrizeSummary>(adm, 'adminPrizes');
@@ -499,6 +501,239 @@ await call(adm, 'adminEggSet', { id: 'secret', need: 0 }).then((r) => check(!r.o
 const eggCsv = await fetch(`${URL}/api/admin/eggs.csv`, { headers: { Authorization: `Bearer ${login.token}` } });
 check(eggCsv.ok && (await eggCsv.text()).includes('비밀 발견자'), '획득 기록 CSV 내보내기');
 host.s.emit('leave');
+
+// ==================================================================== 3차: 우수 PAIR 경품 가챠
+section('3차: 우수 PAIR 경품 가챠');
+const pairInfo = () => call<PairInfo>(adm, 'adminPairInfo');
+{
+  // 이전 점검 기록 정리
+  const sum = await call<PrizeSummary>(adm, 'adminPrizes');
+  for (const aw of sum.awards.filter((x) => x.pool === 'pair' || x.pool === 'draw')) {
+    if (aw.paid) await call(adm, 'adminPrizeSet', { op: 'paid', awardId: aw.id, paid: false });
+    await call(adm, 'adminPrizeSet', { op: 'revoke', awardId: aw.id });
+  }
+}
+check(!(await call(far.s, 'adminPair', { op: 'draw', teamId: 'pair1' })).ok, '일반 참가자는 가챠 조작 불가');
+const teams = [
+  { id: 'pair1', name: '점검팀 가', members: '가1, 가2', badge: 0 },
+  { id: 'pair2', name: '점검팀 나', members: '나1, 나2', badge: 1 },
+  { id: 'pair3', name: '점검팀 다', members: '다1, 다2', badge: 2 },
+];
+check((await call(adm, 'adminPair', { op: 'save', teams })).ok && (await pairInfo()).teams.map((t) => t.name).join() === '점검팀 가,점검팀 나,점검팀 다', '우수 PAIR 3팀 등록·저장');
+const pi0 = await pairInfo();
+check(pi0.remaining.length === 3 && Object.keys(pi0.assigned).length === 0, '상품 3종 재고 확인 (빔프로젝터·말랑이·손난로)');
+const readySeen = waitFor<StageState>((dn) => observer.s.on('stage', (st) => st.mode === 'gacha' && st.phase === 'ready' && dn(st)));
+await call(adm, 'adminPair', { op: 'select', teamId: 'pair1' });
+check((await readySeen)?.mode === 'gacha', '추첨할 팀을 무대 화면에 표시');
+const spinSeen = waitFor<StageState>((dn) => observer.s.on('stage', (st) => st.mode === 'gacha' && st.phase === 'spin' && dn(st)));
+check((await call(adm, 'adminPair', { op: 'draw', teamId: 'pair1' })).ok, '가챠 시작');
+const spin = await spinSeen;
+const pi1 = await pairInfo();
+check(spin?.mode === 'gacha' && !!spin.result && pi1.assigned.pair1?.itemId === spin.result.id && spin.revealAt > Date.now(), '연출 시작 전에 서버가 상품 확정·저장 (연출 = 확정 결과 공개)');
+check(!(await call(adm, 'adminPair', { op: 'draw', teamId: 'pair1' })).ok, '같은 팀 중복 추첨 불가');
+await call(adm, 'adminPair', { op: 'draw', teamId: 'pair2' });
+await call(adm, 'adminPair', { op: 'draw', teamId: 'pair3' });
+const pi2 = await pairInfo();
+const items = Object.values(pi2.assigned).map((a) => a.itemId);
+check(items.length === 3 && new Set(items).size === 3 && pi2.remaining.length === 0, '3팀에 서로 다른 상품 3종 배정 (중복 없음, 마지막 팀은 남은 상품)');
+const sumSeen = waitFor<StageState>((dn) => observer.s.on('stage', (st) => st.mode === 'gachaSummary' && dn(st)));
+await call(adm, 'adminPair', { op: 'summary' });
+const ss = await sumSeen;
+check(ss?.mode === 'gachaSummary' && ss.results.length === 3, '전체 결과 공개 화면');
+const old2 = pi2.assigned.pair2.itemId;
+check((await call(adm, 'adminPair', { op: 'redraw', teamId: 'pair2' })).ok && (await pairInfo()).remaining.map((r) => r.id).join() === old2, '재추첨: 배정 취소 → 그 상품만 다시 후보로 (재고 일관성)');
+await call(adm, 'adminPair', { op: 'draw', teamId: 'pair2' });
+const pi3 = await pairInfo();
+check(pi3.assigned.pair2.itemId === old2 && pi3.log.some((l) => l.action === 'redraw'), '재추첨 후 남은 상품 배정 · 재추첨 이력 기록');
+const sumP = await call<PrizeSummary>(adm, 'adminPrizes');
+check(sumP.items.filter((i) => ['projector', 'squishy', 'fishwarmer'].includes(i.id)).every((i) => i.total === 1 && i.used.pair === 1), '상품 재고: 각 1개, 모두 배정됨');
+const paidId = pi3.assigned.pair1.awardId;
+check((await call(adm, 'adminPrizeSet', { op: 'paid', awardId: paidId, paid: true })).ok && !(await call(adm, 'adminPair', { op: 'reset' })).ok, '지급 완료한 상품이 있으면 전체 초기화 막음');
+await call(adm, 'adminPrizeSet', { op: 'paid', awardId: paidId, paid: false });
+
+// ==================================================================== 3차: 오늘의 행운은 누구에게?
+section('3차: 배민 상품권 랜덤 3명 추첨');
+const host2 = await joinBot('학회장둘', { role: 'senior', grade: 4 });
+await call(host2.s, 'adminAuth', { token: login.token });
+const dupe = await joinBot('같은사람', {}, observer.uid); // 같은 기기 키로 한 번 더 입장
+const li = await call<LuckyInfo>(adm, 'adminLuckyInfo');
+const hsWinnerName = sum2.awards.find((x) => x.pool === 'hideseek')?.nickname;
+check(li.alloc === 3 && li.need === 3, '랜덤 추첨 할당 3장 (숨바꼭질 1장과 별도)');
+check(!li.candidates.some((c) => c.id === host2.id), '학회장 계정은 추첨 대상에서 제외');
+check(li.excludeHsWinner && !li.candidates.some((c) => c.nickname === hsWinnerName), '기본값: 숨바꼭질 당첨자 제외');
+check(li.candidates.filter((c) => c.id === observer.id || c.id === dupe.id).length === 1, '같은 사람(기기)이 두 번 접속해도 후보는 한 번만');
+check(!(await call(far.s, 'adminLucky', { op: 'draw' })).ok, '일반 참가자는 추첨 조작 불가');
+const drawnSeen = waitFor<StageState>((dn) => observer.s.on('stage', (st) => st.mode === 'lucky' && st.phase === 'drawn' && dn(st)));
+check((await call(adm, 'adminLucky', { op: 'draw' })).ok, '추첨 시작');
+const dr = await drawnSeen;
+const sumL = await call<PrizeSummary>(adm, 'adminPrizes');
+const draws = sumL.awards.filter((x) => x.pool === 'draw');
+check(dr?.mode === 'lucky' && dr.winners.length === 3 && draws.length === 3 && new Set(draws.map((x) => x.ownerKey)).size === 3, '서로 다른 3명 당첨 · 서버 저장');
+check(dr?.mode === 'lucky' && dr.winners.every((w, i) => w.nickname === draws[i].nickname), '화면 공개 순서 = 서버 당첨 결과');
+check(!draws.some((x) => x.nickname === hsWinnerName || x.playerId === host2.id), '당첨자 중 학회장·숨바꼭질 당첨자 없음');
+for (let i = 0; i < 3; i++) await call(adm, 'adminLucky', { op: 'reveal' });
+check(!(await call(adm, 'adminLucky', { op: 'reveal' })).ok, '3명 공개 후 추가 공개 없음');
+check(!(await call(adm, 'adminLucky', { op: 'draw' })).ok, '상품권 3장을 모두 배정하면 추가 추첨 불가 (중복 지급 방지)');
+const bm2 = sumL.items.find((i) => i.id === 'baemin')!;
+check(bm2.total === 4 && bm2.alloc.hideseek === 1 && bm2.alloc.draw === 3 && bm2.used.draw === 3, '배민 상품권 4장 = 숨바꼭질 1 + 랜덤 3 (재고 연동)');
+check((await call(adm, 'adminLucky', { op: 'summary' })).ok, '당첨자 3명 전체 화면');
+await call(adm, 'adminStage', { op: 'clear' });
+for (const b of [host2, dupe]) b.s.emit('leave');
+
+// ==================================================================== 3차: 과제 괴물 레이드
+section('3차: 과제 괴물을 물리쳐라! (레이드)');
+let raidSt = null as RaidState | null;
+observer.s.on('raid', (st) => (raidSt = st));
+const raidFx: RaidFx[] = [];
+observer.s.on('rfx', (l) => raidFx.push(...l));
+const rp = (id: number) => raidSt?.players.find((p) => p[0] === id);
+const until = async (fn: () => boolean, ms = 8000) => {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    if (fn()) return true;
+    await sleep(50);
+  }
+  return false;
+};
+/** 정상 속도로 레이드 안에서 걷기 */
+async function rwalk(b: Bot, tx: number, ty: number) {
+  let p = rp(b.id)!;
+  let x = p[1];
+  let y = p[2];
+  for (let i = 0; i < 80; i++) {
+    const dx = tx - x;
+    const dy = ty - y;
+    const dd = Math.hypot(dx, dy);
+    if (dd < 2) break;
+    const step = Math.min(7, dd);
+    x += (dx / dd) * step;
+    y += (dy / dd) * step;
+    b.s.emit('ri', { x, y, d: 0 });
+    await sleep(100);
+  }
+  await sleep(250);
+  p = rp(b.id)!;
+  return Math.hypot(p[1] - tx, p[2] - ty) < 6;
+}
+await call(adm, 'adminRaid', { op: 'close' });
+check(!(await call(far.s, 'adminRaid', { op: 'open' })).ok, '일반 참가자는 레이드 조작 불가');
+check((await call(adm, 'adminRaid', { op: 'open' })).ok && (await until(() => raidSt?.phase === 'lobby')), '대기실 열기 → 모두에게 초대');
+const host3 = await joinBot('학회장셋', { role: 'senior', grade: 4 });
+await call(host3.s, 'adminAuth', { token: login.token });
+check(!(await call(host3.s, 'raidJoin')).ok, '학회장 계정은 전투 인원에서 제외');
+for (const b of [observer, d, e, far]) await call(b.s, 'raidJoin');
+check(await until(() => raidSt?.joined.length === 4), '참가자 4명 대기실 입장');
+check((await call(adm, 'adminRaid', { op: 'start' })).ok && (await until(() => raidSt?.phase === 'countdown')), '학회장이 시작 → 3초 카운트다운');
+check(await until(() => raidSt?.phase === 'battle', 5000), '전투 시작 · 보스 등장');
+const max0 = raidSt!.boss.max;
+check(max0 > 0 && raidSt!.players.length === 4, `참가 인원에 맞춘 보스 체력 (${max0})`);
+// 이동 검증
+const ePos = rp(e.id)!;
+e.s.emit('ri', { x: ePos[1] + 200, y: ePos[2] - 150, d: 0 });
+await sleep(300);
+check(Math.hypot(rp(e.id)![1] - ePos[1], rp(e.id)![2] - ePos[2]) < 5, '순간이동 같은 비정상 이동은 서버가 무시');
+// 공격
+await rwalk(e, RAID.bossX, RAID.bossY + 70);
+const hp1 = raidSt!.boss.hp;
+for (let i = 0; i < 5; i++) {
+  e.s.emit('ri', { a: 'atk' });
+  await sleep(RAID.atkCd + 30);
+}
+await sleep(300);
+check(raidSt!.boss.hp === hp1 - 5, `공격하면 보스 체력 감소 · 쿨타임 적용 (${hp1} → ${raidSt!.boss.hp})`);
+for (let i = 0; i < 5; i++) e.s.emit('ri', { a: 'atk' });
+await sleep(300);
+check(raidSt!.boss.hp >= hp1 - 6, '연타해도 쿨타임 이상으로는 공격 안 됨');
+await rwalk(far, 12, RAID.H - 8);
+const hp2 = raidSt!.boss.hp;
+far.s.emit('ri', { a: 'atk' });
+await sleep(300);
+check(raidSt!.boss.hp === hp2, '사거리 밖 공격은 무효 (서버 거리 판정)');
+// 보스 패턴 · 피격 · 회피 (넓은 '마감 임박' 구역): 왼쪽에 두 명, 오른쪽에 두 명 세워 둠
+await Promise.all([rwalk(observer, 200, 250), rwalk(d, 214, 250), rwalk(e, 266, 250), rwalk(far, 280, 250)]);
+check(await until(() => !!raidSt?.hazards.length, 6000), '보스 공격 경고 구역 표시 (공격 전에)');
+const okDeadline = await until(() => !!raidSt?.hazards.some((hz) => hz.kind === 'deadline'), 12000);
+check(okDeadline, '마감 임박 넓은 구역 패턴');
+if (okDeadline) {
+  const hz = raidSt!.hazards.find((x) => x.kind === 'deadline')!;
+  const inside = (id: number) => {
+    const p = rp(id)!;
+    return p[1] >= hz.x && p[1] <= hz.x + hz.w && p[2] >= hz.y && p[2] <= hz.y + hz.h;
+  };
+  // 구역 쪽 두 명 중 한 명은 공격 직전에 회피, 한 명은 그대로
+  const pair = inside(observer.id) ? [observer, d] : [e, far];
+  const wait = hz.hitAt - Date.now() - 200;
+  if (wait > 0) await sleep(wait);
+  const aIn = inside(pair[0].id);
+  const bIn = inside(pair[1].id);
+  raidFx.length = 0;
+  pair[0].s.emit('ri', { a: 'dodge' });
+  await sleep(700);
+  check(bIn && raidFx.some((f) => f.k === 'hit' && f.id === pair[1].id), '경고 구역 안에 있으면 피격 (서버 판정)');
+  check(aIn && raidFx.some((f) => f.k === 'evade' && f.id === pair[0].id), '타이밍 맞춰 회피하면 피함');
+}
+// 이후 협동·부활 점검은 보스 공격을 멈추고 진행 (개발 서버 전용 점검 기능)
+await call(adm, 'adminRaid', { op: 'debugCalm' });
+await sleep(300);
+// 쓰러짐 · 부활 지원
+await call(adm, 'adminRaid', { op: 'debugDown', id: d.id });
+await sleep(250);
+check(rp(d.id)?.[4] === 1, '체력 0이면 쓰러짐');
+const dp = rp(d.id)!;
+await rwalk(observer, dp[1] + 8, dp[2]);
+raidFx.length = 0;
+observer.s.emit('ri', { a: 'revive' });
+await sleep(300);
+check(rp(d.id)?.[4] !== 1 && raidFx.some((f) => f.k === 'revive' && f.id === d.id && f.v === observer.id), '동료가 다가가 살리면 바로 부활');
+// 2페이즈: 방어막 + 선후배 협동
+await call(adm, 'adminRaid', { op: 'debugHp', ratio: 0.5 });
+check(await until(() => !!raidSt?.boss.shield && raidSt.zones.length > 0), `2페이즈 방어막 + 협동 구역 ${raidSt?.zones.length}곳`);
+const hp3 = raidSt!.boss.hp;
+e.s.emit('ri', { a: 'atk' });
+await sleep(300);
+check(raidSt!.boss.hp === hp3, '방어막 중에는 공격이 막힘');
+const zs = raidSt!.zones.map((z) => ({ ...z }));
+// 후배 두 명만으로는 안 됨 → 선배가 들어오면 채워짐
+await Promise.all([rwalk(e, zs[0].x, zs[0].y), rwalk(d, zs[0].x + 4, zs[0].y)]);
+await sleep(RAID.coopHoldMs + 400);
+check(!raidSt!.zones.find((z) => z.id === zs[0].id)?.on, '후배끼리만 있으면 활성화 안 됨 (선후배 협동 우선)');
+await rwalk(observer, zs[0].x - 4, zs[0].y + 3);
+check(await until(() => !!raidSt?.zones.find((z) => z.id === zs[0].id)?.on || !raidSt?.boss.shield, RAID.coopHoldMs + 2000), '선배+후배가 함께 들어가면 협동 구역 활성화');
+for (const z of zs.slice(1)) {
+  await Promise.all([rwalk(observer, z.x, z.y), rwalk(e, z.x + 4, z.y)]);
+  await until(() => !!raidSt?.zones.find((x) => x.id === z.id)?.on || !raidSt?.boss.shield, RAID.coopHoldMs + 2000);
+}
+check(await until(() => !raidSt?.boss.shield, 3000), '모든 협동 구역 활성화 → 방어막 해제 (TEAMWORK ERROR)');
+// 3페이즈: 최후의 일격
+await call(adm, 'adminRaid', { op: 'debugHp', ratio: 0.1 });
+check(await until(() => !!raidSt?.final), `3페이즈 최후의 일격 (필요 ${raidSt?.final?.need}명)`);
+await rwalk(e, RAID.bossX + 40, RAID.bossY + 60);
+const hp4 = raidSt!.boss.hp;
+for (let i = 0; i < 3; i++) {
+  e.s.emit('ri', { a: 'atk' });
+  await sleep(RAID.atkCd + 30);
+}
+check(raidSt!.boss.hp >= 1 && raidSt!.phase === 'battle', `최후의 일격 전에는 일반 공격으로 끝나지 않음 (${hp4} → ${raidSt!.boss.hp})`);
+const need = raidSt!.final!.need;
+for (const b of [observer, d, e, far].slice(0, need)) b.s.emit('ri', { a: 'final' });
+check(await until(() => raidSt?.phase === 'victory'), '필요 인원이 제출하면 합동 공격 → 승리');
+check(raidSt!.boss.mood === 'broken' || raidSt!.boss.mood === 'off', '보스 화면 깨짐 → 전원 종료 연출 상태');
+check(!!raidSt!.result?.victory && raidSt!.result.players === 4, '결과 저장 (승리 · 참가 4명)');
+const named = raidSt!.awards.filter((a) => a.playerId !== null);
+check(raidSt!.awards.length === 6 && new Set(named.map((a) => a.playerId)).size === named.length, '특별 칭호 6개 · 중복 수상 없음');
+const ri = await call<RaidAdminInfo>(adm, 'adminRaidInfo');
+const es = ri.stats.find((s) => s.id === e.id)!;
+check(es.attacks >= 10 && es.hits >= 5 && es.damage >= 5 && es.distance > 100 && es.coop >= 1 && ri.stats.find((s) => s.id === observer.id)!.revives >= 1, '서버가 직접 센 전투 통계 (공격·데미지·이동·협동·부활)');
+check((await call(adm, 'adminRaid', { op: 'awards' })).ok && (await until(() => raidSt?.phase === 'awards')), '특별 시상식 시작');
+await call(adm, 'adminRaid', { op: 'next' });
+check(await until(() => raidSt?.shown === 1), '수상자 한 명씩 공개');
+await call(adm, 'adminRaid', { op: 'allAwards' });
+check(await until(() => raidSt?.shown === 6), '전체 수상 결과');
+const raidCsv = await fetch(`${URL}/api/admin/raid.csv`, { headers: { Authorization: `Bearer ${login.token}` } });
+check(raidCsv.ok && (await raidCsv.text()).includes('과제 파괴왕'), '레이드 결과 CSV 내보내기');
+await call(adm, 'adminRaid', { op: 'close' });
+check(await until(() => raidSt?.phase === 'off'), '아지트 복귀');
+host3.s.emit('leave');
 
 // ==================================================================== 정리
 section('정리');

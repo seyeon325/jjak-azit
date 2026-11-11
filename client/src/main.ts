@@ -2,13 +2,15 @@
  * 앱 진입점
  *  - /        : 참가자 화면 (접속 → 캐릭터 만들기 → 광장)
  *  - /screen  : 관전 화면 (빔프로젝터용)
- *  - /admin   : 운영자 페이지 (로그인 후 관전 화면 + 관리 패널)
+ *  - /admin   : 학회장 페이지 (로그인 후 관전 화면 + 관리 패널)
  */
 import './styles/fonts.css';
 import './styles/main.css';
 import './styles/features.css';
 import './styles/social.css';
 import './styles/events.css';
+import './styles/stage.css';
+import './styles/raid.css';
 import type Phaser from 'phaser';
 import type { JoinResult, Profile } from '../../shared/protocol';
 import { gradeLabel } from '../../shared/foods';
@@ -20,6 +22,8 @@ import { WorldStore } from './state/WorldStore';
 import { AdminPanel, adminLogin, adminToken, clearAdminToken } from './ui/AdminPanel';
 import { h } from './ui/dom';
 import { HideSeekUi } from './ui/HideSeekUi';
+import { StageShow } from './ui/StageShow';
+import { RaidUi } from './ui/RaidUi';
 import { Hud } from './ui/Hud';
 import { Joystick } from './ui/Joystick';
 import { LoginScreen } from './ui/LoginScreen';
@@ -83,7 +87,7 @@ async function startGame(mode: 'player' | 'screen', store: WorldStore, net: Netw
     const t = Array.from(n.text).slice(0, 22).join('') + (Array.from(n.text).length > 22 ? '…' : '');
     overlay.pop(b.x, b.y - 64, `${n.anon ? '익명' : n.nickname}: ${t}`);
   });
-  return { stage, overlay, canvasHost, scene: () => ref?.scene() ?? null };
+  return { stage, overlay, canvasHost, scene: () => ref?.scene() ?? null, game: () => ref?.game ?? null };
 }
 
 async function fetchTeamNames(): Promise<string[] | undefined> {
@@ -132,7 +136,8 @@ async function runPlayer() {
     hooks.hud = hud;
     hud.applyDisplay();
     if (Storage.prefs.noPrank) net.socket.emit('setPref', { noPrank: true });
-    g.stage.append(hud.el, new Joystick(input).el, new HideSeekUi(store, g.scene, 'player').el);
+    const raidUi = new RaidUi(store, net, g.game, 'player', g.canvasHost, (on) => hud?.setRaidMode(on), input);
+    g.stage.append(hud.el, new Joystick(input).el, new HideSeekUi(store, g.scene, 'player').el, raidUi.el);
     await restoreHost();
     const me = store.self;
     if (me) hud.toast(`어서 와요, ${gradeLabel(me.grade, me.gradeText)} ${me.nickname} ${me.role === 'senior' ? '선배' : '후배'}님!`, 'info');
@@ -185,7 +190,7 @@ async function runPlayer() {
     if (!connected) login.setMessage('서버 연결이 늦어지고 있어요. 잠시 후 입장 버튼을 눌러주세요.', 'info');
   }
 
-  // 운영자가 팀을 바꾸면 저장된 프로필에도 반영 (다음 입장 때 유지)
+  // 학회장이 팀을 바꾸면 저장된 프로필에도 반영 (다음 입장 때 유지)
   store.on('patch', (info, patch) => {
     if (info.id !== store.selfId || patch.team === undefined) return;
     const p = Storage.profile;
@@ -237,10 +242,10 @@ async function runPlayer() {
   });
 }
 
-// ------------------------------------------------------------------ 관전 화면 / 운영자
+// ------------------------------------------------------------------ 관전 화면 / 학회장
 
 async function runScreen(admin: boolean) {
-  document.title = admin ? '짝선짝후 아지트 · 운영자' : '짝선짝후 아지트 · 관전 화면';
+  document.title = admin ? '짝선짝후 아지트 · 학회장' : '짝선짝후 아지트 · 관전 화면';
   let token: string | null = null;
   if (admin) {
     await loadFonts();
@@ -250,7 +255,7 @@ async function runScreen(admin: boolean) {
   const store = new WorldStore();
   store.bind(net.socket);
   const hooks: Hooks = {};
-  const loading = splash(admin ? '운영자 화면을 준비하는 중…' : '관전 화면을 준비하는 중…');
+  const loading = splash(admin ? '학회장 화면을 준비하는 중…' : '관전 화면을 준비하는 중…');
   await loadFonts();
   await net.waitConnected(15000);
 
@@ -275,6 +280,8 @@ async function runScreen(admin: boolean) {
   const hud = new ScreenHud(store, g.scene, g.canvasHost);
   hooks.screen = hud;
   g.stage.append(hud.el, new HideSeekUi(store, g.scene, 'screen').el);
+  // 빔프로젝터 무대 (가챠·행운 추첨): 맵 영역 위에 16:9 로 덮음
+  g.stage.append(new RaidUi(store, net, g.game, 'screen', g.canvasHost).el, new StageShow(store).el);
   const applyDisplay = () => {
     const d = store.display;
     g.overlay.setHidden({ names: d.hideNames || d.photo, teams: d.hideTeams, bubbles: d.hideBubbles || d.photo });
@@ -291,7 +298,7 @@ async function runScreen(admin: boolean) {
     });
     g.stage.append(panel.el);
     g.stage.classList.add('admin');
-    hud.el.querySelector('.qr-card')?.classList.add('hidden'); // 운영자 화면은 QR 기본 숨김 (Q 로 표시)
+    hud.el.querySelector('.qr-card')?.classList.add('hidden'); // 학회장 화면은 QR 기본 숨김 (Q 로 표시)
   }
 
   net.socket.on('disconnect', () => hud.setConn(false));

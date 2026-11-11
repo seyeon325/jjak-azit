@@ -1,7 +1,7 @@
 /**
  * 메인 광장 씬: 맵 렌더링, 내 캐릭터 이동/전송, 다른 참가자 보간, 카메라,
  * 푸드트럭·온천·게시판 상호작용 감지.
- * mode 'player' = 참가자 화면 / 'screen' = 운영자 관전 화면
+ * mode 'player' = 참가자 화면 / 'screen' = 학회장 관전 화면
  */
 import Phaser from 'phaser';
 import { BATH_SPEED, CAMPFIRE_R, MOVE_SPEED, SEAT_RANGE, SEND_HZ, WORLD_H, WORLD_W } from '../../../../shared/constants';

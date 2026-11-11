@@ -6,7 +6,8 @@
 import { INTERP_DELAY_MS, TICK_HZ } from '../../../shared/constants';
 import type { EmoteId, PoseId } from '../../../shared/social';
 import type { SwingState } from '../../../shared/playground';
-import { HS_IDLE, hsActive, type EggEvent, type HsState } from '../../../shared/events';
+import { HS_IDLE, hsActive, STAGE_IDLE, type EggEvent, type HsState, type StageState } from '../../../shared/events';
+import { RAID_IDLE, type RaidFx, type RaidState } from '../../../shared/raid';
 import type {
   BoardComment,
   BoardNote,
@@ -71,6 +72,9 @@ type StoreEvents = {
   muted: [boolean];
   hs: [HsState, HsState];
   egg: [EggEvent];
+  stage: [StageState];
+  raid: [RaidState, RaidState];
+  rfx: [RaidFx[]];
 };
 
 const TICK_MS = 1000 / TICK_HZ;
@@ -84,7 +88,11 @@ export class WorldStore extends Emitter<StoreEvents> {
   muted = false;
   /** 학회장을 찾아라! 상태 */
   hs: HsState = { ...HS_IDLE };
-  /** 이 화면이 학회장(운영자 인증한 참가자) 계정인지 */
+  /** 빔프로젝터 무대 (가챠·행운 추첨) */
+  stage: StageState = { ...STAGE_IDLE };
+  /** 과제 괴물 레이드 */
+  raid: RaidState = { ...RAID_IDLE };
+  /** 이 화면이 학회장(학회장 인증한 참가자) 계정인지 */
   hostAccount = false;
   /** 로컬 시각 - 서버 시각 (지연 포함 추정치) */
   private offset: number | null = null;
@@ -161,11 +169,30 @@ export class WorldStore extends Emitter<StoreEvents> {
     });
     socket.on('hs', (st) => this.setHs(st));
     socket.on('egg', (ev) => this.emit('egg', ev));
+    socket.on('stage', (st) => {
+      this.stage = st;
+      this.emit('stage', st);
+    });
+    socket.on('raid', (st) => this.setRaid(st));
+    socket.on('rfx', (fx) => this.emit('rfx', fx));
+  }
+
+  private setRaid(st: RaidState) {
+    const prev = this.raid;
+    this.raid = st;
+    this.emit('raid', st, prev);
+  }
+
+  /** 내가 레이드 참가자 */
+  get inRaid() {
+    const r = this.raid;
+    if (this.selfId === null || r.phase === 'off') return false;
+    return r.joined.includes(this.selfId) || r.players.some((p) => p[0] === this.selfId);
   }
 
   private setHs(st: HsState) {
     const prev = this.hs;
-    // 같은 회차의 학회장 정보는 (학회장 본인·운영자에게만 오는 값이라) 유지
+    // 같은 회차의 학회장 정보는 (학회장 본인·학회장에게만 오는 값이라) 유지
     if (st.hostId === null && prev.round === st.round && prev.hostId !== null && hsActive(st.phase)) st = { ...st, hostId: prev.hostId };
     this.hs = st;
     this.emit('hs', st, prev);
@@ -199,10 +226,13 @@ export class WorldStore extends Emitter<StoreEvents> {
     if (room.teamNames) this.teamNames = room.teamNames;
     for (const p of room.players) this.add(p, false);
     if (room.hs) this.setHs(room.hs);
+    if (room.stage) this.stage = room.stage;
+    if (room.raid) this.setRaid(room.raid);
     this.emit('reset');
     this.emit('count', this.onlineCount);
     this.emit('display', this.display);
     this.emit('teamNames', this.teamNames);
+    this.emit('stage', this.stage);
   }
 
   get self(): PlayerInfo | null {
@@ -284,7 +314,7 @@ export class WorldStore extends Emitter<StoreEvents> {
   }
 }
 
-/** 이름으로 팀 이름 찾기 (운영자가 바꾼 이름 우선) */
+/** 이름으로 팀 이름 찾기 (학회장이 바꾼 이름 우선) */
 export function teamName(store: WorldStore, team: number): string {
   return store.teamNames[team] ?? ['레드팀', '블루팀', '그린팀', '옐로팀', '퍼플팀', '핑크팀'][team] ?? '';
 }

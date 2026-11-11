@@ -1,7 +1,8 @@
 import { CAMPFIRE_R, EAT_MS, SEAT_RANGE, SLIDE_MS } from '../../shared/constants';
 import { SWING, SWING_OMEGA, swingAmp, swingAngle, swingSeatOffset, type SwingState } from '../../shared/playground';
 import { nearSpot, nearSpringEdge, randomSpawn, WORLD, type Seat } from '../../shared/map';
-import { HS_IDLE, type HsState } from '../../shared/events';
+import { HS_IDLE, type HsState, type StageState } from '../../shared/events';
+import type { RaidState } from '../../shared/raid';
 import type {
   ActRequest,
   ActResult,
@@ -30,6 +31,9 @@ export interface PlazaHooks {
   isMuted(playerId: number): boolean;
   display(): DisplaySettings;
   teamNames(): string[];
+  /** 무대 화면·레이드 상태 (스냅숏용) */
+  stage(): StageState;
+  raid(): RaidState;
   /** 이스터에그용 행동 기록 (서버가 승인한 행동만) */
   stat(playerId: number, key: StatKey, n?: number): void;
 }
@@ -136,6 +140,8 @@ export class PlazaRoom extends Room {
       display: this.hooks.display(),
       teamNames: this.hooks.teamNames(),
       hs: this.rules.state(),
+      stage: this.hooks.stage(),
+      raid: this.hooks.raid(),
     };
   }
 
@@ -400,7 +406,7 @@ export class PlazaRoom extends Room {
   chat(id: number, ch: ChatChannel, text: string): ActResult {
     const p = this.get(id);
     if (!p) return { ok: false, reason: '아지트에 입장한 뒤 이용할 수 있어요.' };
-    if (this.hooks.isMuted(id)) return { ok: false, reason: '운영자가 채팅을 잠시 제한했어요.' };
+    if (this.hooks.isMuted(id)) return { ok: false, reason: '학회장이 채팅을 잠시 제한했어요.' };
     const blocked = this.rules.socialBlock(id);
     if (blocked) return { ok: false, reason: blocked };
     const now = Date.now();

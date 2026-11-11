@@ -12,8 +12,30 @@ import type { WorldStore } from '../state/WorldStore';
 import { h } from './dom';
 
 let audio: AudioContext | null = null;
-/** 짧은 효과음 (브라우저가 막으면 조용히 넘어감) */
+const SOUND_KEY = 'azit.sound';
+let soundOn = (() => {
+  try {
+    return localStorage.getItem(SOUND_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+})();
+export function isSoundOn() {
+  return soundOn;
+}
+export function setSoundOn(v: boolean) {
+  soundOn = v;
+  try {
+    localStorage.setItem(SOUND_KEY, v ? 'on' : 'off');
+  } catch {
+    /* 저장 안 돼도 이번 화면에서는 적용 */
+  }
+  if (v) chime([660], 0.05);
+}
+
+/** 짧은 효과음 (소리 끔·브라우저가 막으면 조용히 넘어감 — 소리 없이도 진행에는 지장 없음) */
 export function chime(notes: number[] = [784, 988, 1319], gap = 0.09) {
+  if (!soundOn) return;
   try {
     audio ??= new AudioContext();
     const t0 = audio.currentTime + 0.02;

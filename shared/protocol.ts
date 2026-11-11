@@ -2,7 +2,8 @@
  * 네트워크 프로토콜 정의 (클라이언트 ↔ 서버).
  * 이벤트를 추가할 때는 여기에 타입을 먼저 선언하면 양쪽에서 자동완성/검사가 됩니다.
  */
-import type { EggAdminRow, EggEvent, EggId, HsState, MyTitles, PrizePool, PrizeSummary } from './events';
+import type { EggAdminRow, EggEvent, EggId, HsState, LuckyInfo, MyTitles, PairInfo, PairTeam, PrizePool, PrizeSummary, StageState } from './events';
+import type { RaidAdminInfo, RaidInput, RaidState, RaidFx } from './raid';
 import type { SwingState } from './playground';
 import type { EmoteId, InteractionId, PoseId } from './social';
 
@@ -78,6 +79,10 @@ export interface RoomSnapshot {
   teamNames: string[];
   /** 학회장을 찾아라! 진행 상태 */
   hs: HsState;
+  /** 빔프로젝터 무대 (가챠·행운 추첨) */
+  stage: StageState;
+  /** 과제 괴물 레이드 */
+  raid: RaidState;
 }
 
 export type JoinResult =
@@ -274,6 +279,33 @@ export interface ClientToServerEvents {
     ack: (res: ActResult) => void,
   ) => void;
 
+  // 우수 PAIR 경품 가챠 · 오늘의 행운 추첨 · 무대 화면 (학회장만)
+  adminPairInfo: (ack: (res: PairInfo | { ok: false; reason: string }) => void) => void;
+  adminPair: (
+    payload:
+      | { op: 'save'; teams: PairTeam[] }
+      | { op: 'select' | 'draw' | 'redraw'; teamId: string }
+      | { op: 'reset' | 'summary' },
+    ack: (res: ActResult) => void,
+  ) => void;
+  adminLuckyInfo: (ack: (res: LuckyInfo | { ok: false; reason: string }) => void) => void;
+  adminLucky: (
+    payload: { op: 'ready' | 'draw' | 'reveal' | 'summary' } | { op: 'exclude'; value: boolean },
+    ack: (res: ActResult) => void,
+  ) => void;
+  adminStage: (payload: { op: 'clear' }, ack: (res: ActResult) => void) => void;
+
+  // 과제 괴물 레이드
+  raidJoin: (ack: (res: ActResult) => void) => void;
+  raidLeave: () => void;
+  /** 이동·행동 입력 */
+  ri: (input: RaidInput) => void;
+  adminRaid: (
+    payload: { op: 'open' | 'start' | 'pause' | 'resume' | 'stop' | 'reset' | 'awards' | 'next' | 'prev' | 'allAwards' | 'close' | 'debugHp' | 'debugDown' | 'debugCalm'; ratio?: number; id?: number },
+    ack: (res: ActResult) => void,
+  ) => void;
+  adminRaidInfo: (ack: (res: RaidAdminInfo | { ok: false; reason: string }) => void) => void;
+
   leave: () => void;
 }
 
@@ -305,6 +337,12 @@ export interface ServerToClientEvents {
   hs: (st: HsState) => void;
   /** 이스터에그 최초 달성 (전체 공개 설정이면 모두에게, 아니면 달성자에게만) */
   egg: (ev: EggEvent) => void;
+  /** 무대 화면 (가챠·행운 추첨) */
+  stage: (st: StageState) => void;
+  /** 레이드 전체 상태 (초당 10번) */
+  raid: (st: RaidState) => void;
+  /** 레이드 일회성 연출 (공격·피격 등) */
+  rfx: (fx: RaidFx[]) => void;
 
   // 게시판
   bn: (note: BoardNote) => void;

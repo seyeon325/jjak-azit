@@ -139,8 +139,13 @@ export interface MyTitles {
 // ------------------------------------------------------------------ 상품
 
 /** 상품 풀: 어떤 이벤트에 몇 개를 배정했는지 (3차: draw = 랜덤 추첨) */
-export type PrizePool = 'hideseek' | 'draw';
-export const POOL_LABEL: Record<PrizePool, string> = { hideseek: '학회장을 찾아라!', draw: '랜덤 추첨 (3차)' };
+export type PrizePool = 'hideseek' | 'draw' | 'pair';
+export const PRIZE_POOLS: PrizePool[] = ['hideseek', 'draw', 'pair'];
+export const POOL_LABEL: Record<PrizePool, string> = { hideseek: '학회장을 찾아라!', draw: '오늘의 행운은 누구에게? (랜덤 3명)', pair: '우수 PAIR 경품 가챠' };
+
+/** 상품 id (서버·화면 공용) */
+export const ITEM = { baemin: 'baemin', projector: 'projector', squishy: 'squishy', fishwarmer: 'fishwarmer' } as const;
+export const PAIR_ITEMS = [ITEM.projector, ITEM.squishy, ITEM.fishwarmer] as string[];
 
 export interface PrizeItem {
   id: string;
@@ -163,7 +168,96 @@ export interface PrizeAward {
   qty: number;
   paid: boolean;
   paidAt: number | null;
+  /** 우수 PAIR 가챠: 팀 단위 수상 (개인 참가자 아님) */
+  teamId?: string;
 }
+
+// ------------------------------------------------------------------ 우수 PAIR 경품 가챠 · 행운 추첨 · 무대 화면
+
+/** 공식 우수 PAIR 팀 (학회장이 실제 자료로 입력 — 아지트 게임 팀과 별개) */
+export interface PairTeam {
+  id: string;
+  name: string;
+  /** 팀원 이름/표시명 (쉼표로 구분해 입력) */
+  members: string;
+  /** 대표 색·심볼 (아지트 팀 컬러 0~5, -1 = 없음) */
+  badge: number;
+}
+
+export interface GachaLog {
+  at: number;
+  action: 'draw' | 'redraw' | 'reset' | 'paid';
+  teamId: string;
+  teamName: string;
+  itemId: string;
+  itemName: string;
+}
+
+export interface PairInfo {
+  teams: PairTeam[];
+  /** 팀 id → 배정 결과 */
+  assigned: Record<string, { awardId: number; itemId: string; itemName: string; at: number; paid: boolean }>;
+  /** 아직 남은 상품 */
+  remaining: { id: string; name: string }[];
+  log: GachaLog[];
+}
+
+/** 행운 추첨 공개용 당첨자 (개인정보 없이 화면 표시 정보만) */
+export interface StageWinner {
+  nickname: string;
+  look: number;
+  grade: number;
+  gradeText: string;
+  role: 'senior' | 'junior';
+  team: number;
+}
+
+export interface LuckyInfo {
+  candidates: { id: number; nickname: string; grade: number; gradeText: string; role: 'senior' | 'junior' }[];
+  excludeHsWinner: boolean;
+  /** 이번 추첨에서 뽑을 인원 (= 남은 할당량) */
+  need: number;
+  alloc: number;
+  used: number;
+}
+
+/**
+ * 빔프로젝터 무대 화면 상태 (서버가 정하고 모든 관전 화면이 같은 장면을 보여줌)
+ * 결과는 연출 시작 전에 서버에서 이미 확정됩니다.
+ */
+export type StageState =
+  | { mode: 'idle'; seq: number }
+  | {
+      mode: 'gacha';
+      seq: number;
+      phase: 'ready' | 'spin';
+      team: PairTeam;
+      /** 이번 가챠 전 남은 상품 (연출용 후보) */
+      pool: { id: string; name: string }[];
+      result: { id: string; name: string } | null;
+      revealAt: number;
+      done: number;
+      total: number;
+    }
+  | { mode: 'gachaSummary'; seq: number; results: { team: PairTeam; itemId: string; itemName: string }[] }
+  | {
+      mode: 'lucky';
+      seq: number;
+      phase: 'ready' | 'drawn';
+      /** 룰렛에 빠르게 지나갈 닉네임 */
+      names: string[];
+      winners: StageWinner[];
+      revealed: number;
+      revealAt: number;
+      candidateCount: number;
+    }
+  | { mode: 'luckySummary'; seq: number; winners: StageWinner[] };
+
+export const STAGE_IDLE: StageState = { mode: 'idle', seq: 0 };
+/** 가챠: 시작 ~ 공개까지 (준비 1초 + 회전 2.5초 + 공개) */
+export const GACHA_SPIN_MS = 3600;
+/** 행운 추첨: 이름 룰렛 ~ 당첨자 공개까지 */
+export const LUCKY_SPIN_MS = 3200;
 
 export interface HsRoundLog {
   round: number;

@@ -60,7 +60,7 @@ export class HideSeek implements PlazaRules {
     return { ...this.st, hostId: this.st.phase === 'hiding' ? null : this.st.hostId };
   }
 
-  /** 운영자에게 보내는 상태 */
+  /** 학회장에게 보내는 상태 */
   adminState(): HsState {
     return { ...this.st, hostId: this.host };
   }
@@ -172,7 +172,7 @@ export class HideSeek implements PlazaRules {
     if (this.st.phase !== 'searching') return this.st.winner ? '이미 발견자가 정해졌어요.' : '지금은 찾을 수 없어요.';
     if (this.st.paused) return '잠시 기다려주세요.';
     if (id === this.host) return '학회장은 찾을 수 없어요.';
-    if (this.d.isHostSession(id)) return '운영자 계정은 참여할 수 없어요.';
+    if (this.d.isHostSession(id)) return '학회장 계정은 참여할 수 없어요.';
     const pl = this.d.plaza;
     const me = pl.get(id);
     const host = this.host !== null ? pl.get(this.host) : undefined;
@@ -234,7 +234,7 @@ export class HideSeek implements PlazaRules {
     this.push(true);
   }
 
-  cancel(reason = '운영자가 숨바꼭질을 종료했어요.') {
+  cancel(reason = '학회장이 숨바꼭질을 종료했어요.') {
     if (!this.active) return;
     const wasPlaying = this.st.phase === 'hiding' || this.st.phase === 'searching';
     this.clearTimers();
@@ -248,7 +248,7 @@ export class HideSeek implements PlazaRules {
     this.push(true);
   }
 
-  /** 운영자 '종료': 진행 중이면 취소, 결과 연출 중이면 바로 마무리 */
+  /** 학회장 '종료': 진행 중이면 취소, 결과 연출 중이면 바로 마무리 */
   end() {
     if (this.st.phase === 'found' || this.st.phase === 'timeout') return this.finish();
     this.cancel();

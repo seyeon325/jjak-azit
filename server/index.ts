@@ -1,7 +1,7 @@
 /**
  * 짝선짝후 아지트 — 실시간 서버
- *  - HTTP: 빌드된 클라이언트 정적 파일, /api/info, 운영자 로그인·CSV 내보내기
- *  - WebSocket(Socket.IO): 입장·재접속·이동·음식·온천·좌석·놀이기구·채팅·게시판·운영자 기능
+ *  - HTTP: 빌드된 클라이언트 정적 파일, /api/info, 학회장 로그인·CSV 내보내기
+ *  - WebSocket(Socket.IO): 입장·재접속·이동·음식·온천·좌석·놀이기구·채팅·게시판·학회장 기능
  */
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -25,6 +25,8 @@ import { WORLD, zoneAt } from '../shared/map';
 import { TEAMS } from '../shared/social';
 import { BoardStore, type Author } from './BoardStore';
 import { EggStore } from './EggStore';
+import { EventStage } from './EventStage';
+import { RaidGame } from './Raid';
 import { HideSeek } from './HideSeek';
 import { PrizeStore } from './PrizeStore';
 import { PlazaRoom, type StatKey } from './rooms/PlazaRoom';
@@ -43,7 +45,7 @@ const NOTE_COOLDOWN_MS = 8000;
 const COMMENT_COOLDOWN_MS = 3000;
 const ADMIN_TTL_MS = 12 * 60 * 60 * 1000;
 
-// 운영자 비밀번호: 환경변수가 없으면 서버가 켜질 때마다 임시 비밀번호를 만들어 로그에 표시
+// 학회장 비밀번호: 환경변수가 없으면 서버가 켜질 때마다 임시 비밀번호를 만들어 로그에 표시
 const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD ?? '').trim() || randomBytes(4).toString('hex');
 const ADMIN_FROM_ENV = !!(process.env.ADMIN_PASSWORD ?? '').trim();
 
@@ -104,7 +106,7 @@ app.get('/api/info', (_req, res) => {
   });
 });
 
-// 운영자 로그인 (IP 당 1분에 8번까지)
+// 학회장 로그인 (IP 당 1분에 8번까지)
 const loginTries = new Map<string, number[]>();
 app.post('/api/admin/login', (req, res) => {
   const ip = req.ip ?? 'x';
@@ -117,7 +119,7 @@ app.post('/api/admin/login', (req, res) => {
   if (!pw || !passwordOk(pw)) return res.status(401).json({ ok: false, reason: '비밀번호가 맞지 않아요.' });
   const token = randomBytes(24).toString('hex');
   adminTokens.set(token, now + ADMIN_TTL_MS);
-  log('운영자 로그인');
+  log('학회장 로그인');
   res.json({ ok: true, token, expiresAt: now + ADMIN_TTL_MS });
 });
 
@@ -129,21 +131,22 @@ app.post('/api/admin/logout', (req, res) => {
 
 app.get('/api/admin/export.csv', (req, res) => {
   const t = String(req.get('authorization') ?? '').replace(/^Bearer /, '');
-  if (!adminTokenValid(t)) return res.status(401).send('운영자 로그인이 필요해요.');
+  if (!adminTokenValid(t)) return res.status(401).send('학회장 로그인이 필요해요.');
   const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="jjak-azit-board-${stamp}.csv"`);
   res.send(board.toCSV());
 });
 
-// 이스터에그 기록 · 상품 당첨 기록 내보내기 (운영자만)
+// 이스터에그 기록 · 상품 당첨 기록 내보내기 (학회장만)
 for (const [route, name, csv] of [
   ['/api/admin/eggs.csv', 'eggs', () => eggs.toCSV()],
   ['/api/admin/prizes.csv', 'prizes', () => prizes.toCSV()],
+  ['/api/admin/raid.csv', 'raid', () => raid.toCSV()],
 ] as const) {
   app.get(route, (req, res) => {
     const t = String(req.get('authorization') ?? '').replace(/^Bearer /, '');
-    if (!adminTokenValid(t)) return res.status(401).send('운영자 로그인이 필요해요.');
+    if (!adminTokenValid(t)) return res.status(401).send('학회장 로그인이 필요해요.');
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="jjak-azit-${name}-${stamp}.csv"`);
@@ -210,7 +213,33 @@ plaza.hooks = {
   display: () => effectiveDisplay(),
   teamNames: () => settings.data.teamNames,
   stat: (playerId, key) => eggStat(playerId, key),
+  stage: () => stage.state(),
+  raid: () => raid.state(),
 };
+
+// ------------------------------------------------------------------ 경품 무대 (우수 PAIR 가챠 · 오늘의 행운 추첨)
+
+const stage = new EventStage({
+  plaza,
+  prizes,
+  sessions: () => sessions.all(),
+  broadcast: (st) => io.to(plaza.channel).emit('stage', st),
+  tell: (id, text) => plaza.hooks.emitTo(id, 'info', text),
+  log: (m) => log(m),
+});
+
+// ------------------------------------------------------------------ 과제 괴물 레이드
+
+const raid = new RaidGame(
+  {
+    plaza,
+    isHostSession: (id) => !!sessions.byPlayer(id)?.admin,
+    broadcast: (st) => io.to(plaza.channel).volatile.emit('raid', st),
+    fx: (list) => io.to(plaza.channel).emit('rfx', list),
+    log: (m) => log(m),
+  },
+  path.join(DATA_DIR, 'raid.json'),
+);
 
 // ------------------------------------------------------------------ 학회장을 찾아라!
 
@@ -219,7 +248,7 @@ const hs = new HideSeek({
   prizes,
   broadcast: (st) => {
     io.to(plaza.channel).emit('hs', st);
-    // 운영자 화면(관전 소켓)에는 학회장 정보가 포함된 상태를 따로 보냄
+    // 학회장 화면(관전 소켓)에는 학회장 정보가 포함된 상태를 따로 보냄
     for (const s of io.sockets.sockets.values()) if ((s as IOSocket).data.admin && !(s as IOSocket).data.token) s.emit('hs', hs.adminState());
     // 학회장 본인은 자기가 학회장인 걸 알아야 함
     if (hs.hostId !== null) plaza.hooks.emitTo(hs.hostId, 'hs', hs.adminState());
@@ -232,7 +261,7 @@ const hs = new HideSeek({
 });
 plaza.rules = hs;
 
-/** 운영자가 정한 화면 설정 + 숨바꼭질 중 강제 설정 (원래 설정은 그대로 보관 → 끝나면 자동 복원) */
+/** 학회장이 정한 화면 설정 + 숨바꼭질 중 강제 설정 (원래 설정은 그대로 보관 → 끝나면 자동 복원) */
 function effectiveDisplay(): DisplaySettings {
   return hs.overrideDisplay(settings.data.display);
 }
@@ -316,6 +345,7 @@ function leave(socket: IOSocket) {
   if (!session) return;
   sessions.delete(token);
   hs.onHostGone(session.playerId);
+  raid.removePlayer(session.playerId);
   plaza.removePlayer(session.playerId, 'left');
   log(`퇴장: ${session.nickname} (#${session.playerId})`);
 }
@@ -347,7 +377,7 @@ function cooldownLeft(map: Map<string, number>, key: string, ms: number) {
   return 0;
 }
 
-const NO_AUTH = { ok: false as const, reason: '운영자 로그인이 필요해요.' };
+const NO_AUTH = { ok: false as const, reason: '학회장 로그인이 필요해요.' };
 const NOT_IN = { ok: false as const, reason: '아지트에 입장한 뒤 이용할 수 있어요.' };
 
 io.on('connection', (rawSocket) => {
@@ -491,7 +521,7 @@ io.on('connection', (rawSocket) => {
     if (typeof ack !== 'function') return;
     const m = me(socket);
     if (!m) return ack({ ok: false, reason: '아지트에 입장한 뒤 쪽지를 남길 수 있어요.' });
-    if (settings.isMuted(m.session.ownerKey)) return ack({ ok: false, reason: '운영자가 글쓰기를 잠시 제한했어요.' });
+    if (settings.isMuted(m.session.ownerKey)) return ack({ ok: false, reason: '학회장이 글쓰기를 잠시 제한했어요.' });
     const text = sanitizeNote(payload?.text, NOTE_MAX);
     if (!text) return ack({ ok: false, reason: '쪽지 내용을 입력해주세요.' });
     const wait = cooldownLeft(lastNoteAt, m.session.ownerKey, NOTE_COOLDOWN_MS);
@@ -547,7 +577,7 @@ io.on('connection', (rawSocket) => {
     if (typeof ack !== 'function') return;
     const m = me(socket);
     if (!m) return ack(NOT_IN);
-    if (settings.isMuted(m.session.ownerKey)) return ack({ ok: false, reason: '운영자가 글쓰기를 잠시 제한했어요.' });
+    if (settings.isMuted(m.session.ownerKey)) return ack({ ok: false, reason: '학회장이 글쓰기를 잠시 제한했어요.' });
     const text = sanitizeText(payload?.text, COMMENT_MAX);
     if (!text) return ack({ ok: false, reason: '댓글 내용을 입력해주세요.' });
     const wait = cooldownLeft(lastCommentAt, m.session.ownerKey, COMMENT_COOLDOWN_MS);
@@ -585,11 +615,11 @@ io.on('connection', (rawSocket) => {
     ack({ ok: true });
   });
 
-  // ---------------------------------------------------------------- 운영자
+  // ---------------------------------------------------------------- 학회장
 
   socket.on('adminAuth', (payload, ack) => {
     if (typeof ack !== 'function') return;
-    if (!adminTokenValid(payload?.token)) return ack({ ok: false, reason: '운영자 로그인이 만료됐어요. 다시 로그인해주세요.' });
+    if (!adminTokenValid(payload?.token)) return ack({ ok: false, reason: '학회장 로그인이 만료됐어요. 다시 로그인해주세요.' });
     socket.data.admin = true;
     const m = me(socket);
     if (m) {
@@ -622,11 +652,11 @@ io.on('connection', (rawSocket) => {
     const cmd = payload?.cmd;
     let r: string | null = null;
     if (cmd === 'start') {
-      // 참가자 화면에서 학회장 로그인한 사람이 시작하면 본인이 학회장, 운영자 페이지에서는 고른 학회장
+      // 참가자 화면에서 학회장 로그인한 사람이 시작하면 본인이 학회장, 학회장 페이지에서는 고른 학회장
       const self = me(socket);
       const hostId = self?.session.admin ? self.session.playerId : Number(payload?.hostId);
       const sec = payload?.searchSec === undefined ? undefined : Number(payload.searchSec);
-      r = hs.start(hostId, sec);
+      r = raid.active ? '레이드가 진행 중이에요. 레이드를 닫은 뒤 시작해주세요.' : hs.start(hostId, sec);
     } else if (cmd === 'end') hs.end();
     else if (cmd === 'cancel') hs.cancel();
     else if (cmd === 'reset') r = hs.reset();
@@ -642,6 +672,128 @@ io.on('connection', (rawSocket) => {
       .filter((s) => s.admin && plaza.has(s.playerId))
       .map((s) => ({ id: s.playerId, nickname: plaza.get(s.playerId)!.nickname, online: plaza.get(s.playerId)!.status === 'online' }));
     ack({ ok: true, state: hs.adminState(), hosts, hostId: hs.hostId });
+  });
+
+  // ---------------------------------------------------------------- 우수 PAIR 가챠 · 오늘의 행운 추첨 · 무대
+
+  const done = (ack: (r: { ok: true } | { ok: false; reason: string }) => void, r: string | null) => ack(r ? { ok: false, reason: r } : { ok: true });
+
+  socket.on('adminPairInfo', (ack) => {
+    if (typeof ack !== 'function') return;
+    if (!isAdmin()) return ack(NO_AUTH);
+    ack(stage.pairInfo());
+  });
+
+  socket.on('adminPair', (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    if (!isAdmin()) return ack(NO_AUTH);
+    const op = payload?.op;
+    const teamId = 'teamId' in (payload ?? {}) ? String((payload as { teamId: unknown }).teamId) : '';
+    if (op === 'save') return done(ack, stage.saveTeams((payload as { teams: unknown }).teams));
+    if (op === 'select') return done(ack, stage.selectTeam(teamId));
+    if (op === 'draw') return done(ack, stage.drawTeam(teamId));
+    if (op === 'redraw') return done(ack, stage.redrawTeam(teamId));
+    if (op === 'reset') return done(ack, stage.resetPair());
+    if (op === 'summary') return done(ack, stage.pairSummary());
+    done(ack, '알 수 없는 요청이에요.');
+  });
+
+  socket.on('adminLuckyInfo', (ack) => {
+    if (typeof ack !== 'function') return;
+    if (!isAdmin()) return ack(NO_AUTH);
+    ack(stage.luckyInfo());
+  });
+
+  socket.on('adminLucky', (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    if (!isAdmin()) return ack(NO_AUTH);
+    const op = payload?.op;
+    if (op === 'exclude') {
+      stage.setExcludeHs(!!(payload as { value: unknown }).value);
+      return done(ack, null);
+    }
+    if (op === 'ready') return done(ack, stage.luckyReady());
+    if (op === 'draw') return done(ack, stage.luckyDraw());
+    if (op === 'reveal') return done(ack, stage.luckyReveal());
+    if (op === 'summary') return done(ack, stage.luckySummary());
+    done(ack, '알 수 없는 요청이에요.');
+  });
+
+  socket.on('adminStage', (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    if (!isAdmin()) return ack(NO_AUTH);
+    if (payload?.op === 'clear') stage.clear();
+    done(ack, null);
+  });
+
+  // ---------------------------------------------------------------- 과제 괴물 레이드
+
+  socket.on('raidJoin', (ack) => {
+    if (typeof ack !== 'function') return;
+    const m = me(socket);
+    if (!m) return ack(NOT_IN);
+    if (hs.active) return ack({ ok: false, reason: '숨바꼭질이 끝난 뒤에 참여할 수 있어요.' });
+    done(ack, raid.join(m.session.playerId));
+  });
+
+  socket.on('raidLeave', () => {
+    const m = me(socket);
+    if (m) raid.leave(m.session.playerId);
+  });
+
+  socket.on('ri', (inp) => {
+    const m = me(socket);
+    if (!m || !inp || typeof inp !== 'object') return;
+    const a = inp.a;
+    raid.input(m.session.playerId, {
+      x: typeof inp.x === 'number' ? inp.x : undefined,
+      y: typeof inp.y === 'number' ? inp.y : undefined,
+      d: typeof inp.d === 'number' ? inp.d : undefined,
+      a: a === 'atk' || a === 'dodge' || a === 'revive' || a === 'final' ? a : undefined,
+    });
+  });
+
+  socket.on('adminRaid', (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    if (!isAdmin()) return ack(NO_AUTH);
+    const op = payload?.op;
+    if (op !== 'open' && op !== 'close' && hs.active) return done(ack, '숨바꼭질이 진행 중이에요.');
+    if (op === 'open') {
+      if (hs.active) return done(ack, '숨바꼭질이 끝난 뒤에 열 수 있어요.');
+      return done(ack, raid.open());
+    }
+    if (op === 'start') return done(ack, raid.start());
+    if (op === 'pause') return done(ack, raid.pause());
+    if (op === 'resume') return done(ack, raid.resume());
+    if (op === 'stop') return done(ack, raid.stop());
+    if (op === 'reset') return done(ack, raid.restart());
+    if (op === 'awards') return done(ack, raid.beginAwards());
+    if (op === 'next') return done(ack, raid.next());
+    if (op === 'prev') return done(ack, raid.prev());
+    if (op === 'allAwards') return done(ack, raid.all());
+    if (op === 'close') {
+      raid.close();
+      return done(ack, null);
+    }
+    if (op === 'debugCalm' && !IS_PROD) {
+      raid.debugCalm();
+      return done(ack, null);
+    }
+    if (op === 'debugDown' && !IS_PROD) {
+      raid.debugDown(Number(payload.id));
+      return done(ack, null);
+    }
+    if (op === 'debugHp' && !IS_PROD) {
+      raid.debugSetHp(Number(payload.ratio));
+      return done(ack, null);
+    }
+    done(ack, '알 수 없는 요청이에요.');
+  });
+
+  socket.on('adminRaidInfo', (ack) => {
+    if (typeof ack !== 'function') return;
+    if (!isAdmin()) return ack(NO_AUTH);
+    ack(raid.adminInfo());
   });
 
   // ---------------------------------------------------------------- 상품
@@ -794,7 +946,7 @@ io.on('connection', (rawSocket) => {
     const r = board.remove(id, null);
     if (r !== true) return ack({ ok: false, reason: r });
     io.to(plaza.channel).emit('bd', id);
-    log(`운영자가 쪽지 #${id} 삭제`);
+    log(`학회장이 쪽지 #${id} 삭제`);
     ack({ ok: true });
   });
 
@@ -823,6 +975,7 @@ io.on('connection', (rawSocket) => {
     hs.onHostAway(session.playerId);
     sessions.startGrace(session, GRACE_MS, () => {
       hs.onHostGone(session.playerId);
+      raid.removePlayer(session.playerId);
       plaza.removePlayer(session.playerId, 'timeout');
       log(`연결 종료: ${session.nickname} (#${session.playerId})`);
     });
@@ -840,8 +993,8 @@ httpServer.listen(PORT, () => {
   console.log(`  - 이 컴퓨터: http://localhost:${PORT}${IS_PROD ? '' : '  (개발 모드 화면은 http://localhost:5173)'}`);
   if (IS_PROD) for (const u of lanUrls(PORT)) console.log(`  - 같은 Wi-Fi: ${u}`);
   if (PUBLIC_URL) console.log(`  - 공개 주소: ${PUBLIC_URL}`);
-  if (ADMIN_FROM_ENV) console.log('  - 운영자 페이지: /admin (ADMIN_PASSWORD 환경변수의 비밀번호)');
-  else console.log(`  - 운영자 페이지: /admin  임시 비밀번호: ${ADMIN_PASSWORD}  (재시작하면 바뀜 — ADMIN_PASSWORD 를 설정하세요)`);
+  if (ADMIN_FROM_ENV) console.log('  - 학회장 페이지: /admin (ADMIN_PASSWORD 환경변수의 비밀번호)');
+  else console.log(`  - 학회장 페이지: /admin  임시 비밀번호: ${ADMIN_PASSWORD}  (재시작하면 바뀜 — ADMIN_PASSWORD 를 설정하세요)`);
   console.log('');
 });
 

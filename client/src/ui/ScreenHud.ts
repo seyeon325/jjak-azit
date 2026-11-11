@@ -9,6 +9,16 @@ import { TEAMS, teamSvg } from '../../../shared/social';
 import type { ScreenCamMode, WorldScene } from '../game/scenes/WorldScene';
 import type { WorldStore } from '../state/WorldStore';
 import { h, icon, logoMark, roleLabel } from './dom';
+import { isSoundOn, setSoundOn } from './HideSeekUi';
+
+/** 효과음 켜기/끄기 (빔프로젝터 화면) */
+function soundBtn() {
+  const label = () => (isSoundOn() ? ' 소리 켜짐' : ' 소리 꺼짐');
+  const kbd = h('kbd', {}, 'S');
+  const txt = document.createTextNode(label());
+  const b = h('button', { type: 'button', title: '효과음 켜기/끄기', onclick: () => { setSoundOn(!isSoundOn()); txt.textContent = label(); } }, kbd, txt);
+  return b;
+}
 
 export class ScreenHud {
   readonly el: HTMLElement;
@@ -70,6 +80,7 @@ export class ScreenHud {
       h('button', { type: 'button', onclick: () => this.toggleList() }, h('kbd', {}, 'L'), ' 참가자'),
       h('button', { type: 'button', onclick: () => this.qrBox.classList.toggle('hidden') }, h('kbd', {}, 'Q'), ' QR'),
       h('button', { type: 'button', onclick: () => this.fullscreen() }, h('kbd', {}, 'F'), ' 전체 화면'),
+      soundBtn(),
     );
 
     this.el = h(
@@ -110,6 +121,7 @@ export class ScreenHud {
       if (e.key === 'l' || e.key === 'L') this.toggleList();
       if (e.key === 'q' || e.key === 'Q') this.qrBox.classList.toggle('hidden');
       if (e.key === 'f' || e.key === 'F') this.fullscreen();
+      if (e.key === 's' || e.key === 'S') (this.controls.querySelector('button[title="효과음 켜기/끄기"]') as HTMLButtonElement | null)?.click();
       if (e.key === 'Escape') this.cam('all');
       const s = this.scene();
       if (!s) return;
