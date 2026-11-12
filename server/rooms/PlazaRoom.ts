@@ -42,7 +42,7 @@ export type StatKey = 'swing' | 'sumung' | 'dance' | 'prank' | 'secret';
 
 /** 행사 이벤트(숨바꼭질 등)가 광장 규칙을 잠시 바꿀 때 쓰는 연결점 */
 export interface PlazaRules {
-  /** 이동 금지 (블라인드·발견 연출·수색 중 학회장) */
+  /** 이동 금지 (블라인드·발견 연출·수색 중 운영자) */
   moveBlocked(id: number): boolean;
   /** 위치를 방송하지 않을 참가자 */
   hiddenId(): number | null;
@@ -153,7 +153,7 @@ export class PlazaRoom extends Room {
     this.patch(id, { x: to.x, y: to.y, bath: false, seat: null, followId: null });
   }
 
-  /** 숨기 시작 전 학회장 정리 (좌석·온천에서 나옴) */
+  /** 숨기 시작 전 운영자 정리 (좌석·온천에서 나옴) */
   freeHost(id: number) {
     const p = this.get(id);
     if (!p) return;
@@ -164,7 +164,7 @@ export class PlazaRoom extends Room {
     }
   }
 
-  /** 서버 위치를 직접 정함 (학회장 숨은 위치 확정 등) */
+  /** 서버 위치를 직접 정함 (운영자 숨은 위치 확정 등) */
   place(id: number, x: number, y: number) {
     this.patch(id, { x, y });
   }
@@ -416,7 +416,7 @@ export class PlazaRoom extends Room {
   chat(id: number, ch: ChatChannel, text: string): ActResult {
     const p = this.get(id);
     if (!p) return { ok: false, reason: '아지트에 입장한 뒤 이용할 수 있어요.' };
-    if (this.hooks.isMuted(id)) return { ok: false, reason: '학회장이 채팅을 잠시 제한했어요.' };
+    if (this.hooks.isMuted(id)) return { ok: false, reason: '운영자가 채팅을 잠시 제한했어요.' };
     const blocked = this.rules.socialBlock(id);
     if (blocked) return { ok: false, reason: blocked };
     const now = Date.now();

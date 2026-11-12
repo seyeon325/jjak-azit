@@ -2,7 +2,7 @@
  * 빔프로젝터 무대 화면 (관객용) — 우수 PAIR 경품 가챠 · 오늘의 행운은 누구에게?
  *  - 1920×1080 기준으로 그리고 화면 크기에 맞춰 통째로 확대/축소 (16:9)
  *  - 결과는 서버가 이미 확정한 것만 보여줌 (연출은 공개 순서·타이밍만 담당)
- *  - 학회장 조작 버튼·개인정보 없음
+ *  - 운영자 조작 버튼·개인정보 없음
  */
 import { gradeLabel } from '../../../shared/foods';
 import { GACHA_SPIN_MS, LUCKY_SPIN_MS, type PairTeam, type StageState, type StageWinner } from '../../../shared/events';

@@ -1,12 +1,12 @@
 /**
- * 학회장을 찾아라! (숨바꼭질) — 서버가 모든 상태와 판정을 맡습니다.
+ * 운영자를 찾아라! (숨바꼭질) — 서버가 모든 상태와 판정을 맡습니다.
  *
- *  READY → HIDING(15초, 학회장만 이동·위치 비공개) → SEARCHING(학회장 고정, 참가자 광장 리스폰)
+ *  READY → HIDING(15초, 운영자만 이동·위치 비공개) → SEARCHING(운영자 고정, 참가자 광장 리스폰)
  *        → FOUND(최초 발견자 확정·상품권 배정) 또는 TIMEOUT → FINISHED
  *  관리자 강제 종료 → CANCELLED
  *
- * 위치 보호: 숨는 동안 학회장 좌표는 위치 방송·상태 변경·스냅숏 어디에도 실리지 않습니다
- * (학회장 본인 화면만 자기 위치를 앎). 블라인드는 화면만 가리는 게 아니라 데이터 자체를 막습니다.
+ * 위치 보호: 숨는 동안 운영자 좌표는 위치 방송·상태 변경·스냅숏 어디에도 실리지 않습니다
+ * (운영자 본인 화면만 자기 위치를 앎). 블라인드는 화면만 가리는 게 아니라 데이터 자체를 막습니다.
  */
 import { HS, HS_IDLE, hsActive, type HsPhase, type HsState } from '../shared/events';
 import { WORLD } from '../shared/map';
@@ -27,12 +27,12 @@ export interface HsDeps {
   log(msg: string): void;
 }
 
-const EVENT_NAME = '학회장을 찾아라!';
+const EVENT_NAME = '운영자를 찾아라!';
 
 export class HideSeek implements PlazaRules {
   private st: HsState = { ...HS_IDLE };
   private host: number | null = null;
-  /** 숨기 시작 전 학회장 위치 (숨는 동안 다른 사람에게는 이 위치만 보임) */
+  /** 숨기 시작 전 운영자 위치 (숨는 동안 다른 사람에게는 이 위치만 보임) */
   private startPos = { x: 0, y: 0 };
   private timer: NodeJS.Timeout | null = null;
   private graceTimer: NodeJS.Timeout | null = null;
@@ -55,12 +55,12 @@ export class HideSeek implements PlazaRules {
     return hsActive(this.st.phase);
   }
 
-  /** 참가자에게 보내는 상태 (숨는 동안에는 학회장이 누구인지도 숨김) */
+  /** 참가자에게 보내는 상태 (숨는 동안에는 운영자가 누구인지도 숨김) */
   state(): HsState {
     return { ...this.st, hostId: this.st.phase === 'hiding' ? null : this.st.hostId };
   }
 
-  /** 학회장에게 보내는 상태 */
+  /** 운영자에게 보내는 상태 */
   adminState(): HsState {
     return { ...this.st, hostId: this.host };
   }
@@ -94,9 +94,9 @@ export class HideSeek implements PlazaRules {
 
   actBlock(id: number): string | null {
     const p = this.st.phase;
-    if (p === 'hiding') return id === this.host ? '숨는 동안에는 이동만 할 수 있어요.' : '학회장이 숨는 중이에요!';
+    if (p === 'hiding') return id === this.host ? '숨는 동안에는 이동만 할 수 있어요.' : '운영자가 숨는 중이에요!';
     if (p === 'searching') {
-      if (id === this.host) return '숨은 학회장은 움직일 수 없어요.';
+      if (id === this.host) return '숨은 운영자는 움직일 수 없어요.';
       if (this.st.paused) return '잠시 기다려주세요.';
     }
     if ((p === 'found' || p === 'timeout') && Date.now() < this.freezeUntil) return '잠시만요!';
@@ -105,8 +105,8 @@ export class HideSeek implements PlazaRules {
 
   socialBlock(id: number): string | null {
     const p = this.st.phase;
-    if (p === 'hiding') return '학회장이 숨는 중이에요!';
-    if (p === 'searching' && id === this.host) return '수색 중에는 학회장이 말할 수 없어요.';
+    if (p === 'hiding') return '운영자가 숨는 중이에요!';
+    if (p === 'searching' && id === this.host) return '수색 중에는 운영자가 말할 수 없어요.';
     return null;
   }
 
@@ -121,13 +121,13 @@ export class HideSeek implements PlazaRules {
     if (this.active) return '이미 숨바꼭질이 진행 중이에요.';
     const pl = this.d.plaza;
     const host = pl.get(hostId);
-    if (!host || !this.d.isHostSession(hostId)) return '학회장 아바타를 찾을 수 없어요. 참가자 화면에서 학회장 로그인을 해주세요.';
-    if (host.status !== 'online') return '학회장 화면의 연결이 끊겨 있어요.';
+    if (!host || !this.d.isHostSession(hostId)) return '운영자 아바타를 찾을 수 없어요. 참가자 화면에서 운영자 로그인을 해주세요.';
+    if (host.status !== 'online') return '운영자 화면의 연결이 끊겨 있어요.';
     const sec = Number.isFinite(searchSec) ? Math.round(searchSec!) : HS.searchMs / 1000;
     if (sec < HS.minSearchSec || sec > HS.maxSearchSec) return `수색 시간은 ${HS.minSearchSec}~${HS.maxSearchSec}초로 정해주세요.`;
 
     pl.freeHost(hostId);
-    pl.patch(hostId, { host: false }); // 학회장 배지 숨김
+    pl.patch(hostId, { host: false }); // 운영자 배지 숨김
     const h = pl.get(hostId)!;
     this.host = hostId;
     this.hostNick = h.nickname;
@@ -143,7 +143,7 @@ export class HideSeek implements PlazaRules {
       searchMs: sec * 1000,
     };
     this.schedule(HS.hideMs, () => this.beginSearch());
-    this.d.log(`숨바꼭질 ${this.st.round}회차 시작 (학회장 ${h.nickname}, 수색 ${sec}초)`);
+    this.d.log(`숨바꼭질 ${this.st.round}회차 시작 (운영자 ${h.nickname}, 수색 ${sec}초)`);
     this.push(true);
     return null;
   }
@@ -151,12 +151,12 @@ export class HideSeek implements PlazaRules {
   private beginSearch() {
     const pl = this.d.plaza;
     const host = this.host !== null ? pl.get(this.host) : undefined;
-    if (!host) return this.cancel('학회장이 나가서 숨바꼭질이 취소됐어요.');
+    if (!host) return this.cancel('운영자가 나가서 숨바꼭질이 취소됐어요.');
     // 숨은 위치 확정: 갈 수 없는 곳이면 가장 가까운 서 있을 수 있는 곳으로
     const spot = WORLD.collision.canStand(host.x, host.y) ? { x: host.x, y: host.y } : WORLD.collision.nearest(host.x, host.y, 96) ?? this.startPos;
 
     this.st = { ...this.st, phase: 'searching', endsAt: Date.now() + this.st.searchMs };
-    // 이제부터 학회장 위치를 방송 (숨는 단계가 끝났으므로)
+    // 이제부터 운영자 위치를 방송 (숨는 단계가 끝났으므로)
     pl.place(host.id, spot.x, spot.y);
     // 일반 참가자: 상호작용 해제 후 중앙 광장에 흩어서 리스폰
     const others = pl.list().filter((p) => p.id !== host.id);
@@ -171,8 +171,8 @@ export class HideSeek implements PlazaRules {
   find(id: number): string | null {
     if (this.st.phase !== 'searching') return this.st.winner ? '이미 발견자가 정해졌어요.' : '지금은 찾을 수 없어요.';
     if (this.st.paused) return '잠시 기다려주세요.';
-    if (id === this.host) return '학회장은 찾을 수 없어요.';
-    if (this.d.isHostSession(id)) return '학회장 계정은 참여할 수 없어요.';
+    if (id === this.host) return '운영자는 찾을 수 없어요.';
+    if (this.d.isHostSession(id)) return '운영자 계정은 참여할 수 없어요.';
     const pl = this.d.plaza;
     const me = pl.get(id);
     const host = this.host !== null ? pl.get(this.host) : undefined;
@@ -204,7 +204,7 @@ export class HideSeek implements PlazaRules {
     });
     this.d.log(`숨바꼭질 발견! ${me.nickname}${award ? ' (배달의민족 상품권 배정)' : ' (상품권 할당 소진 — 기록만)'}`);
     this.push(false);
-    // 발견자는 기뻐하고, 학회장은 깜짝
+    // 발견자는 기뻐하고, 운영자는 깜짝
     setTimeout(() => {
       pl.broadcastPose(id, 'jump');
       if (this.host !== null) pl.broadcastPose(this.host, 'surprised');
@@ -234,7 +234,7 @@ export class HideSeek implements PlazaRules {
     this.push(true);
   }
 
-  cancel(reason = '학회장이 숨바꼭질을 종료했어요.') {
+  cancel(reason = '운영자가 숨바꼭질을 종료했어요.') {
     if (!this.active) return;
     const wasPlaying = this.st.phase === 'hiding' || this.st.phase === 'searching';
     this.clearTimers();
@@ -248,7 +248,7 @@ export class HideSeek implements PlazaRules {
     this.push(true);
   }
 
-  /** 학회장 '종료': 진행 중이면 취소, 결과 연출 중이면 바로 마무리 */
+  /** 운영자 '종료': 진행 중이면 취소, 결과 연출 중이면 바로 마무리 */
   end() {
     if (this.st.phase === 'found' || this.st.phase === 'timeout') return this.finish();
     this.cancel();
@@ -262,7 +262,7 @@ export class HideSeek implements PlazaRules {
     return null;
   }
 
-  // ---------------------------------------------------------------- 학회장 연결 끊김
+  // ---------------------------------------------------------------- 운영자 연결 끊김
 
   onHostAway(id: number) {
     if (id !== this.host || (this.st.phase !== 'hiding' && this.st.phase !== 'searching') || this.st.paused) return;
@@ -270,8 +270,8 @@ export class HideSeek implements PlazaRules {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.st = { ...this.st, paused: true, leftMs: left };
-    this.graceTimer = setTimeout(() => this.cancel('학회장 연결이 끊겨 숨바꼭질이 취소됐어요.'), HS.hostGraceMs);
-    this.d.log('숨바꼭질 일시정지 (학회장 연결 끊김)');
+    this.graceTimer = setTimeout(() => this.cancel('운영자 연결이 끊겨 숨바꼭질이 취소됐어요.'), HS.hostGraceMs);
+    this.d.log('숨바꼭질 일시정지 (운영자 연결 끊김)');
     this.push(false);
   }
 
@@ -282,13 +282,13 @@ export class HideSeek implements PlazaRules {
     const left = this.st.leftMs;
     this.st = { ...this.st, paused: false, leftMs: 0, endsAt: Date.now() + left };
     this.schedule(left, () => (this.st.phase === 'hiding' ? this.beginSearch() : this.timeout()));
-    this.d.log('숨바꼭질 재개 (학회장 재접속)');
+    this.d.log('숨바꼭질 재개 (운영자 재접속)');
     this.push(false);
   }
 
   onHostGone(id: number) {
     if (id !== this.host) return;
-    if (this.st.phase === 'hiding' || this.st.phase === 'searching') this.cancel('학회장이 나가서 숨바꼭질이 취소됐어요.');
+    if (this.st.phase === 'hiding' || this.st.phase === 'searching') this.cancel('운영자가 나가서 숨바꼭질이 취소됐어요.');
   }
 
   // ---------------------------------------------------------------- 내부

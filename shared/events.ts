@@ -1,6 +1,6 @@
 /**
  * 행사 이벤트 공용 정의 (서버·클라이언트 공용)
- *  - 학회장을 찾아라! (숨바꼭질)
+ *  - 운영자를 찾아라! (숨바꼭질)
  *  - 이스터에그 · 칭호
  *  - 상품 (배달의민족 상품권 등) 할당·지급 기록
  * 3차의 랜덤 추첨·레이드도 같은 '상품 풀(pool)' 구조에 연결합니다.
@@ -11,7 +11,7 @@
 export type HsPhase = 'ready' | 'hiding' | 'searching' | 'found' | 'timeout' | 'finished' | 'cancelled';
 
 export const HS = {
-  /** 학회장이 숨는 시간 */
+  /** 운영자가 숨는 시간 */
   hideMs: 15_000,
   /** 기본 수색 시간 */
   searchMs: 120_000,
@@ -22,7 +22,7 @@ export const HS = {
   /** 발견·시간 종료 연출 후 자동으로 마무리되는 시간 */
   foundShowMs: 11_000,
   timeoutShowMs: 9_000,
-  /** 학회장이 연결이 끊긴 뒤 이벤트를 취소하기까지 */
+  /** 운영자가 연결이 끊긴 뒤 이벤트를 취소하기까지 */
   hostGraceMs: 45_000,
 };
 
@@ -41,12 +41,12 @@ export interface HsState {
   /** 현재 단계가 끝나는 서버 시각 */
   endsAt: number;
   searchMs: number;
-  /** 학회장 연결 끊김으로 일시정지 */
+  /** 운영자 연결 끊김으로 일시정지 */
   paused: boolean;
   /** 일시정지 때 남아 있던 시간 */
   leftMs: number;
   winner: HsWinner | null;
-  /** 발견·시간 종료 때 공개되는 학회장 위치와 발견자 위치 */
+  /** 발견·시간 종료 때 공개되는 운영자 위치와 발견자 위치 */
   reveal: { x: number; y: number } | null;
   winnerPos: { x: number; y: number } | null;
 }
@@ -71,7 +71,7 @@ export function hsActive(p: HsPhase) {
 
 export const HS_PHASE_LABEL: Record<HsPhase, string> = {
   ready: '준비',
-  hiding: '학회장 숨는 중',
+  hiding: '운영자 숨는 중',
   searching: '수색 중',
   found: '발견 성공',
   timeout: '시간 종료',
@@ -141,7 +141,7 @@ export interface MyTitles {
 /** 상품 풀: 어떤 이벤트에 몇 개를 배정했는지 (3차: draw = 랜덤 추첨) */
 export type PrizePool = 'hideseek' | 'draw' | 'pair';
 export const PRIZE_POOLS: PrizePool[] = ['hideseek', 'draw', 'pair'];
-export const POOL_LABEL: Record<PrizePool, string> = { hideseek: '학회장을 찾아라!', draw: '오늘의 행운은 누구에게? (랜덤 3명)', pair: '우수 PAIR 경품 가챠' };
+export const POOL_LABEL: Record<PrizePool, string> = { hideseek: '운영자를 찾아라!', draw: '오늘의 행운은 누구에게? (랜덤 3명)', pair: '우수 PAIR 경품 가챠' };
 
 /** 상품 id (서버·화면 공용) */
 export const ITEM = { baemin: 'baemin', projector: 'projector', squishy: 'squishy', fishwarmer: 'fishwarmer' } as const;

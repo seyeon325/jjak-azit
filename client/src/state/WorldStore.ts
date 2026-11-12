@@ -86,13 +86,13 @@ export class WorldStore extends Emitter<StoreEvents> {
   teamNames: string[] = [];
   swings: Record<string, SwingState> = {};
   muted = false;
-  /** 학회장을 찾아라! 상태 */
+  /** 운영자를 찾아라! 상태 */
   hs: HsState = { ...HS_IDLE };
   /** 빔프로젝터 무대 (가챠·행운 추첨) */
   stage: StageState = { ...STAGE_IDLE };
   /** 과제 괴물 레이드 */
   raid: RaidState = { ...RAID_IDLE };
-  /** 이 화면이 학회장(학회장 인증한 참가자) 계정인지 */
+  /** 이 화면이 운영자(관리자 인증한 참가자) 계정인지 */
   hostAccount = false;
   /** 로컬 시각 - 서버 시각 (지연 포함 추정치) */
   private offset: number | null = null;
@@ -192,7 +192,7 @@ export class WorldStore extends Emitter<StoreEvents> {
 
   private setHs(st: HsState) {
     const prev = this.hs;
-    // 같은 회차의 학회장 정보는 (학회장 본인·학회장에게만 오는 값이라) 유지
+    // 같은 회차의 운영자 정보는 (운영자 본인·운영자에게만 오는 값이라) 유지
     if (st.hostId === null && prev.round === st.round && prev.hostId !== null && hsActive(st.phase)) st = { ...st, hostId: prev.hostId };
     this.hs = st;
     this.emit('hs', st, prev);
@@ -203,7 +203,7 @@ export class WorldStore extends Emitter<StoreEvents> {
     return hsActive(this.hs.phase);
   }
 
-  /** 내가 이번 회차의 학회장 */
+  /** 내가 이번 회차의 운영자 */
   get iAmHost() {
     return this.selfId !== null && this.hs.hostId === this.selfId;
   }
@@ -314,7 +314,7 @@ export class WorldStore extends Emitter<StoreEvents> {
   }
 }
 
-/** 이름으로 팀 이름 찾기 (학회장이 바꾼 이름 우선) */
+/** 이름으로 팀 이름 찾기 (운영자가 바꾼 이름 우선) */
 export function teamName(store: WorldStore, team: number): string {
   return store.teamNames[team] ?? ['레드팀', '블루팀', '그린팀', '옐로팀', '퍼플팀', '핑크팀'][team] ?? '';
 }

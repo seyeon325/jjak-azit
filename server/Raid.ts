@@ -144,7 +144,7 @@ export class RaidGame {
     this.boss.moodUntil = Date.now() + ms;
   }
 
-  // ---------------------------------------------------------------- 학회장 조작
+  // ---------------------------------------------------------------- 운영자 조작
 
   open(): string | null {
     if (this.inBattle) return '레이드가 진행 중이에요.';
@@ -283,7 +283,7 @@ export class RaidGame {
   // ---------------------------------------------------------------- 참가자
 
   join(id: number): string | null {
-    if (this.d.isHostSession(id)) return '학회장은 전투에 참여하지 않아요. 관전 화면에서 진행해주세요.';
+    if (this.d.isHostSession(id)) return '운영자는 전투에 참여하지 않아요. 관전 화면에서 진행해주세요.';
     if (this.phase === 'lobby') {
       this.lobby.add(id);
       this.push();
@@ -732,7 +732,7 @@ export class RaidGame {
     this.fxq.push({ k: 'down', id });
   }
 
-  /** 테스트·점검용: 보스 체력을 비율로 맞춤 (학회장만) */
+  /** 테스트·점검용: 보스 체력을 비율로 맞춤 (운영자만) */
   debugSetHp(ratio: number) {
     if (this.phase !== 'battle') return;
     this.boss.hp = Math.max(1, Math.round(this.boss.max * ratio));

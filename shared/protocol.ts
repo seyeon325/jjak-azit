@@ -53,7 +53,7 @@ export interface PlayerInfo extends Profile {
   followId: number | null;
   /** 장난(물풍선·뿅망치·그네 밀기 등) 받지 않기 */
   noPrank: boolean;
-  /** 학회장(운영자 인증한 참가자) */
+  /** 운영자(관리자 인증한 참가자) */
   host: boolean;
   /** 장착한 칭호 (이스터에그 id) */
   title: EggId | null;
@@ -77,7 +77,7 @@ export interface RoomSnapshot {
   swings: Record<string, SwingState>;
   display: DisplaySettings;
   teamNames: string[];
-  /** 학회장을 찾아라! 진행 상태 */
+  /** 운영자를 찾아라! 진행 상태 */
   hs: HsState;
   /** 빔프로젝터 무대 (가챠·행운 추첨) */
   stage: StageState;
@@ -200,9 +200,9 @@ export interface AdminNote extends BoardNote {
 export interface AdminHsInfo {
   ok: true;
   state: HsState;
-  /** 학회장으로 숨을 수 있는 참가자 (참가자 화면에서 학회장 로그인한 사람) */
+  /** 운영자로 숨을 수 있는 참가자 (참가자 화면에서 운영자 로그인한 사람) */
   hosts: { id: number; nickname: string; online: boolean }[];
-  /** 진행 중인 회차의 학회장 */
+  /** 진행 중인 회차의 운영자 */
   hostId: number | null;
 }
 
@@ -252,7 +252,7 @@ export interface ClientToServerEvents {
   adminDeleteNote: (payload: { id: number }, ack: (res: ActResult) => void) => void;
   adminDeleteComment: (payload: { id: number }, ack: (res: ActResult) => void) => void;
 
-  // 학회장을 찾아라! (시작·종료는 운영자만, 발견 판정은 서버)
+  // 운영자를 찾아라! (시작·종료는 운영자만, 발견 판정은 서버)
   hsFind: (ack: (res: ActResult) => void) => void;
   adminHs: (
     payload: { cmd: 'start' | 'end' | 'cancel' | 'reset'; searchSec?: number; hostId?: number },
@@ -279,7 +279,7 @@ export interface ClientToServerEvents {
     ack: (res: ActResult) => void,
   ) => void;
 
-  // 우수 PAIR 경품 가챠 · 오늘의 행운 추첨 · 무대 화면 (학회장만)
+  // 우수 PAIR 경품 가챠 · 오늘의 행운 추첨 · 무대 화면 (운영자만)
   adminPairInfo: (ack: (res: PairInfo | { ok: false; reason: string }) => void) => void;
   adminPair: (
     payload:
@@ -333,7 +333,7 @@ export interface ServerToClientEvents {
   display: (d: DisplaySettings) => void;
   teamNames: (names: string[]) => void;
   muted: (muted: boolean) => void;
-  /** 학회장을 찾아라! 상태 */
+  /** 운영자를 찾아라! 상태 */
   hs: (st: HsState) => void;
   /** 이스터에그 최초 달성 (전체 공개 설정이면 모두에게, 아니면 달성자에게만) */
   egg: (ev: EggEvent) => void;

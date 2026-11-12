@@ -71,7 +71,7 @@ export class Room {
 
   /**
    * 방 전체 상태. viewerId 를 주면 그 사람에게 보여도 되는 정보만 담습니다.
-   * (예: 숨바꼭질 숨는 단계에서는 학회장 위치를 학회장 본인에게만)
+   * (예: 숨바꼭질 숨는 단계에서는 운영자 위치를 운영자 본인에게만)
    */
   snapshot(viewerId: number | null = null): RoomSnapshot {
     return {
@@ -109,7 +109,7 @@ export class Room {
     return false;
   }
 
-  /** 위치 방송에서 뺄 참가자 (숨는 중인 학회장) */
+  /** 위치 방송에서 뺄 참가자 (숨는 중인 운영자) */
   protected hiddenId(): number | null {
     return null;
   }
@@ -154,7 +154,7 @@ export class Room {
     if (patch.x !== undefined || patch.y !== undefined) {
       rec.lastMoveAt = Date.now();
       if (id === this.hiddenId()) {
-        // 숨는 중인 학회장의 좌표는 방송하지 않음
+        // 숨는 중인 운영자의 좌표는 방송하지 않음
         const { x: _x, y: _y, ...rest } = patch;
         if (Object.keys(rest).length) this.io.to(this.channel).emit('pu', id, rest);
         return;
@@ -211,7 +211,7 @@ export class Room {
     const full = ++this.tickCount % (TICK_HZ * 3) === 0;
     const hidden = this.hiddenId();
     for (const rec of this.players.values()) {
-      if (rec.info.id === hidden) continue; // 숨는 학회장 위치는 아무에게도 보내지 않음
+      if (rec.info.id === hidden) continue; // 숨는 운영자 위치는 아무에게도 보내지 않음
       if (!rec.dirty && !full) continue;
       rec.dirty = false;
       const p = rec.info;

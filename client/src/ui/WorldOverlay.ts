@@ -87,11 +87,11 @@ export class WorldOverlay {
     name.className = 'plate-name';
     name.textContent = info.nickname;
     el.append(badge, name);
-    // 학회장 배지 (숨바꼭질 중에는 서버가 host=false 로 바꿔 숨김)
+    // 운영자 배지 (숨바꼭질 중에는 서버가 host=false 로 바꿔 숨김)
     if (info.host) {
       const s = document.createElement('span');
       s.className = 'plate-host';
-      s.textContent = '학회장';
+      s.textContent = '운영자';
       el.append(s);
     }
     // 이스터에그 칭호: 이름표 위쪽 작은 배지 (학년·팀 심볼과 겹치지 않게 따로 줄)

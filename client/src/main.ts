@@ -2,7 +2,7 @@
  * 앱 진입점
  *  - /        : 참가자 화면 (접속 → 캐릭터 만들기 → 광장)
  *  - /screen  : 관전 화면 (빔프로젝터용)
- *  - /admin   : 학회장 페이지 (로그인 후 관전 화면 + 관리 패널)
+ *  - /admin   : 운영자 페이지 (로그인 후 관전 화면 + 관리 패널)
  */
 import './styles/fonts.css';
 import './styles/main.css';
@@ -148,7 +148,7 @@ async function runPlayer() {
     if (me) hud.toast(`어서 와요, ${gradeLabel(me.grade, me.gradeText)} ${me.nickname} ${me.role === 'senior' ? '선배' : '후배'}님!`, 'info');
   };
 
-  /** 이 탭에서 학회장 로그인을 했었다면 새 연결에도 권한 다시 확인 (서버는 같은 세션이면 권한 유지) */
+  /** 이 탭에서 운영자 로그인을 했었다면 새 연결에도 권한 다시 확인 (서버는 같은 세션이면 권한 유지) */
   const restoreHost = async () => {
     const t = adminToken();
     if (!t) return;
@@ -195,7 +195,7 @@ async function runPlayer() {
     if (!connected) login.setMessage('서버 연결이 늦어지고 있어요. 잠시 후 입장 버튼을 눌러주세요.', 'info');
   }
 
-  // 학회장이 팀을 바꾸면 저장된 프로필에도 반영 (다음 입장 때 유지)
+  // 운영자가 팀을 바꾸면 저장된 프로필에도 반영 (다음 입장 때 유지)
   store.on('patch', (info, patch) => {
     if (info.id !== store.selfId || patch.team === undefined) return;
     const p = Storage.profile;
@@ -247,10 +247,10 @@ async function runPlayer() {
   });
 }
 
-// ------------------------------------------------------------------ 관전 화면 / 학회장
+// ------------------------------------------------------------------ 관전 화면 / 운영자
 
 async function runScreen(admin: boolean) {
-  document.title = admin ? '짝선짝후 아지트 · 학회장' : '짝선짝후 아지트 · 관전 화면';
+  document.title = admin ? '짝선짝후 아지트 · 운영자' : '짝선짝후 아지트 · 관전 화면';
   let token: string | null = null;
   if (admin) {
     await loadFonts();
@@ -260,7 +260,7 @@ async function runScreen(admin: boolean) {
   const store = new WorldStore();
   store.bind(net.socket);
   const hooks: Hooks = {};
-  const loading = splash(admin ? '학회장 화면을 준비하는 중…' : '관전 화면을 준비하는 중…');
+  const loading = splash(admin ? '운영자 화면을 준비하는 중…' : '관전 화면을 준비하는 중…');
   await loadFonts();
   await net.waitConnected(15000);
 
@@ -282,7 +282,7 @@ async function runScreen(admin: boolean) {
 
   const g = await startGame('screen', store, net, hooks);
   g.overlay.addZoneLabels(WORLD.zones);
-  // 빔프로젝터 화면이 메인 스피커 (기본 켜짐) · 학회장 화면은 기본 꺼짐 → 같은 공간에서 소리가 겹치지 않음
+  // 빔프로젝터 화면이 메인 스피커 (기본 켜짐) · 운영자 화면은 기본 꺼짐 → 같은 공간에서 소리가 겹치지 않음
   startSoundDirector(initSound(admin ? 'admin' : 'screen'), store, g.scene);
   const hud = new ScreenHud(store, g.scene, g.canvasHost);
   hooks.screen = hud;
@@ -305,7 +305,7 @@ async function runScreen(admin: boolean) {
     });
     g.stage.append(panel.el);
     g.stage.classList.add('admin');
-    hud.el.querySelector('.qr-card')?.classList.add('hidden'); // 학회장 화면은 QR 기본 숨김 (Q 로 표시)
+    hud.el.querySelector('.qr-card')?.classList.add('hidden'); // 운영자 화면은 QR 기본 숨김 (Q 로 표시)
   }
 
   net.socket.on('disconnect', () => hud.setConn(false));

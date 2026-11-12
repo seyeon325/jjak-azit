@@ -42,14 +42,14 @@ export function soundControls(e: Engine, note?: string) {
   return box;
 }
 
-/** 관전 화면 · 학회장 화면용: 상단 버튼 + 펼치는 설정 */
+/** 관전 화면 · 운영자 화면용: 상단 버튼 + 펼치는 설정 */
 export function soundButton(e: Engine) {
   const txt = document.createTextNode('');
   const panel = h('div', { class: 'snd-pop hidden' });
   const btn = h('button', { type: 'button', title: '소리 설정', onclick: (ev) => {
     ev.stopPropagation();
     const open = panel.classList.toggle('hidden') === false;
-    if (open) panel.replaceChildren(soundControls(e, e.role === 'admin' ? '학회장 화면은 기본으로 꺼져 있어요. 빔프로젝터 화면과 같은 공간이면 꺼 두세요 (소리 겹침 방지).' : '빔프로젝터 화면이 행사 메인 스피커예요.'));
+    if (open) panel.replaceChildren(soundControls(e, e.role === 'admin' ? '운영자 화면은 기본으로 꺼져 있어요. 빔프로젝터 화면과 같은 공간이면 꺼 두세요 (소리 겹침 방지).' : '빔프로젝터 화면이 행사 메인 스피커예요.'));
   } }, h('kbd', {}, 'S'), txt);
   const render = () => (txt.textContent = e.enabled ? (e.locked ? ' 소리 대기' : ' 소리 켜짐') : ' 소리 꺼짐');
   e.onChange(render);

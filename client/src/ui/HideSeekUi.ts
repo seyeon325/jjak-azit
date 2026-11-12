@@ -1,9 +1,9 @@
 /**
- * 학회장을 찾아라! 화면 연출 (참가자 화면·관전 화면 공용)
- *  - 숨는 동안: 블라인드 + 15초 카운트다운 (학회장 본인은 안내 배너만)
+ * 운영자를 찾아라! 화면 연출 (참가자 화면·관전 화면 공용)
+ *  - 숨는 동안: 블라인드 + 15초 카운트다운 (운영자 본인은 안내 배너만)
  *  - 수색 중: 남은 시간 배너
- *  - 발견: '찾았다!!' → 카메라가 학회장·발견자로 확대 → 폭죽 → 우승자·상품 안내
- *  - 시간 종료: 학회장 위치 공개
+ *  - 발견: '찾았다!!' → 카메라가 운영자·발견자로 확대 → 폭죽 → 우승자·상품 안내
+ *  - 시간 종료: 운영자 위치 공개
  * 블라인드는 화면 가림일 뿐이고, 실제 위치 보호는 서버가 좌표를 보내지 않는 방식으로 처리합니다.
  */
 import type { HsState } from '../../../shared/events';
@@ -39,7 +39,7 @@ export class HideSeekUi {
     this.blind = h(
       'div',
       { class: 'hs-blind hidden', role: 'alert' },
-      h('div', { class: 'hs-blind-card' }, h('div', { class: 'hs-eyes' }, h('i'), h('i')), h('h2', {}, '학회장이 숨어 있습니다!'), this.blindSub, this.blindCount),
+      h('div', { class: 'hs-blind-card' }, h('div', { class: 'hs-eyes' }, h('i'), h('i')), h('h2', {}, '운영자가 숨어 있습니다!'), this.blindSub, this.blindCount),
     );
     this.banner = h('div', { class: 'hs-banner hidden' });
     this.splash = h('div', { class: 'hs-splash hidden' });
@@ -65,7 +65,7 @@ export class HideSeekUi {
     }
     document.body.classList.toggle('hs-on', this.store.hsActive);
 
-    // 블라인드: 숨는 동안 학회장이 아닌 모든 화면
+    // 블라인드: 숨는 동안 운영자가 아닌 모든 화면
     this.blind.classList.toggle('hidden', !(st.phase === 'hiding' && !this.host));
 
     if (!changed) return this.tick();
@@ -80,7 +80,7 @@ export class HideSeekUi {
       case 'searching':
         s?.focusOn(null);
         if (this.host) this.flash('수색 시작!', '이제 움직일 수 없어요. 들키지 않길!');
-        else this.flash('학회장을 찾아라!', '가장 먼저 발견하는 사람이 승리합니다!');
+        else this.flash('운영자를 찾아라!', '가장 먼저 발견하는 사람이 승리합니다!');
         if (!restore) sfx('hs.search');
         break;
       case 'found': {
@@ -95,7 +95,7 @@ export class HideSeekUi {
         break;
       }
       case 'timeout':
-        this.flash('아쉽게도 아무도 학회장을 찾지 못했습니다!', '학회장은 여기 숨어 있었어요.');
+        this.flash('아쉽게도 아무도 운영자를 찾지 못했습니다!', '운영자는 여기 숨어 있었어요.');
         sfx('hs.fail');
         if (st.reveal) this.wait(600, () => this.scene()?.focusOn([st.reveal!]));
         break;
@@ -121,16 +121,16 @@ export class HideSeekUi {
     const sec = Math.ceil(left / 1000);
     if (st.phase === 'hiding') {
       this.blindCount.textContent = st.paused ? '…' : String(Math.max(1, sec));
-      this.blindSub.textContent = st.paused ? '학회장 연결이 잠시 끊겼어요. 다시 연결되면 이어서 진행해요.' : `${Math.max(1, sec)}초 후 수색이 시작됩니다.`;
+      this.blindSub.textContent = st.paused ? '운영자 연결이 잠시 끊겼어요. 다시 연결되면 이어서 진행해요.' : `${Math.max(1, sec)}초 후 수색이 시작됩니다.`;
     }
     let text: Node[] | null = null;
-    if (st.paused && (st.phase === 'hiding' || st.phase === 'searching')) text = [h('b', {}, '잠시 멈춤'), h('span', {}, '학회장 연결이 끊겼어요 · 기다리는 중')];
+    if (st.paused && (st.phase === 'hiding' || st.phase === 'searching')) text = [h('b', {}, '잠시 멈춤'), h('span', {}, '운영자 연결이 끊겼어요 · 기다리는 중')];
     else if (st.phase === 'hiding' && this.host) text = [h('b', {}, '숨는 중'), h('span', {}, `숨을 곳으로 이동하세요 · ${sec}초`)];
     else if (st.phase === 'searching')
       text = this.host
         ? [h('b', {}, '숨는 중'), h('span', {}, `참가자들이 찾고 있어요 · ${fmt(sec)}`)]
-        : [h('b', {}, '학회장을 찾아라!'), h('span', { class: 'hs-time' }, fmt(sec))];
-    else if (st.phase === 'timeout') text = [h('b', {}, '시간 종료'), h('span', {}, '학회장은 여기 숨어 있었어요!')];
+        : [h('b', {}, '운영자를 찾아라!'), h('span', { class: 'hs-time' }, fmt(sec))];
+    else if (st.phase === 'timeout') text = [h('b', {}, '시간 종료'), h('span', {}, '운영자는 여기 숨어 있었어요!')];
     else if (st.phase === 'found') text = [h('b', {}, '발견 성공!'), h('span', {}, st.winner ? `${st.winner.nickname} 님이 찾았어요` : '')];
     this.banner.classList.toggle('hidden', !text);
     this.banner.classList.toggle('urgent', st.phase === 'searching' && !st.paused && sec <= 10);
@@ -158,7 +158,7 @@ export class HideSeekUi {
       h(
         'div',
         { class: 'hs-result-card' },
-        h('p', { class: 'hs-r-top' }, '학회장을 찾았습니다!'),
+        h('p', { class: 'hs-r-top' }, '운영자를 찾았습니다!'),
         h('p', { class: 'hs-r-label' }, '최초 발견자'),
         h('strong', { class: 'hs-r-name' }, st.winner.nickname),
         st.winner.prize ? h('p', { class: 'hs-r-prize' }, '배달의민족 상품권 당첨!') : h('p', { class: 'hs-r-note' }, '이번 회차 상품권은 이미 지급되었어요'),

@@ -268,7 +268,7 @@ export class RaidUi {
         h('p', { class: 'raid-lobby-n' }, `${names.length}명 참여 중`),
         h('div', { class: 'chips' }, ...names.slice(0, 40).map((p) => h('span', { class: `chip ${p!.role}` }, p!.nickname))),
         this.mode === 'player'
-          ? h('p', { class: 'muted small' }, '학회장이 시작하면 3초 뒤 전투가 시작돼요. 이동: 조이스틱/WASD · 공격: Space · 회피: Shift')
+          ? h('p', { class: 'muted small' }, '운영자가 시작하면 3초 뒤 전투가 시작돼요. 이동: 조이스틱/WASD · 공격: Space · 회피: Shift')
           : h('p', { class: 'raid-lobby-how' }, "휴대폰 화면의 '참여하기'를 눌러 함께해요!"),
         this.mode === 'player'
           ? h(
@@ -401,7 +401,7 @@ export class RaidUi {
           h('span', {}, h('b', {}, String(r.totalDamage)), '총 데미지'),
           h('span', {}, h('b', {}, String(r.totalRevives)), '부활 지원'),
         ),
-        me ? h('p', { class: 'muted small' }, '학회장이 곧 특별 시상식을 시작해요!') : null,
+        me ? h('p', { class: 'muted small' }, '운영자가 곧 특별 시상식을 시작해요!') : null,
       ),
     );
   }

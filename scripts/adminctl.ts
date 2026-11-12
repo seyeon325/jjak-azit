@@ -1,5 +1,5 @@
 /**
- * 학회장 기능을 명령줄에서 실행 (리허설·점검용)
+ * 운영자 기능을 명령줄에서 실행 (리허설·점검용)
  *   npx tsx scripts/adminctl.ts <이벤트> '<JSON>' [주소]
  *   예) npx tsx scripts/adminctl.ts adminRaid '{"op":"open"}'
  * 비밀번호는 ADMIN_PASSWORD (개발 기본값 azit-dev)

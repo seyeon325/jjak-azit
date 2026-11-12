@@ -422,8 +422,8 @@ const csvNo = await fetch(`${URL}/api/admin/export.csv`);
 const csv = await fetch(`${URL}/api/admin/export.csv`, { headers: { Authorization: `Bearer ${login.token}` } });
 check(csvNo.status === 401 && csv.ok && (await csv.text()).includes('종류'), 'CSV 내보내기 (운영자만)');
 
-// ==================================================================== 학회장을 찾아라!
-section('2차 추가: 학회장을 찾아라! (숨바꼭질)');
+// ==================================================================== 운영자를 찾아라!
+section('2차 추가: 운영자를 찾아라! (숨바꼭질)');
 await call(adm, 'adminRaid', { op: 'close' }); // 이전 점검에서 남은 레이드 정리
 // 이전 점검에서 남은 숨바꼭질 당첨 기록 정리 (개발 서버 데이터)
 {
@@ -433,14 +433,14 @@ await call(adm, 'adminRaid', { op: 'close' }); // 이전 점검에서 남은 레
     await call(adm, 'adminPrizeSet', { op: 'revoke', awardId: aw.id });
   }
 }
-const host = await joinBot('학회장봇', { role: 'senior', grade: 4 });
+const host = await joinBot('운영자봇', { role: 'senior', grade: 4 });
 const hostBadge = waitFor<boolean>((dn) => observer.s.on('pu', (id, p) => id === host.id && p.host === true && dn(true)));
-check((await call(host.s, 'adminAuth', { token: login.token })).ok && !!(await hostBadge), '참가자 화면에서 학회장 로그인 → 학회장 배지');
+check((await call(host.s, 'adminAuth', { token: login.token })).ok && !!(await hostBadge), '참가자 화면에서 운영자 로그인 → 운영자 배지');
 const info0 = await call<AdminHsInfo>(adm, 'adminHsInfo');
-check(info0.hosts.some((x) => x.id === host.id), '운영자 페이지에서 학회장 아바타 목록 확인');
+check(info0.hosts.some((x) => x.id === host.id), '운영자 페이지에서 운영자 아바타 목록 확인');
 check(!(await call(far.s, 'adminHs', { cmd: 'start' })).ok, '일반 참가자는 숨바꼭질을 시작할 수 없음');
 
-// 관찰자에게 오는 학회장 위치 기록
+// 관찰자에게 오는 운영자 위치 기록
 const leaks: string[] = [];
 let hiding = false;
 observer.s.on('s', (_t, st) => hiding && st.some((x) => x[0] === host.id) && leaks.push('s'));
@@ -450,23 +450,23 @@ observer.s.on('hs', (st) => hsSeen.push(st));
 const hidingSeen = waitFor<HsState>((dn) => observer.s.on('hs', (st) => st.phase === 'hiding' && dn(st)));
 const dispHidden = waitFor<boolean>((dn) => observer.s.on('display', (dd) => dn(dd.hideNames && dd.hideTeams)));
 hiding = true;
-check((await call(host.s, 'adminHs', { cmd: 'start', searchSec: 60 })).ok, '학회장이 숨바꼭질 시작');
+check((await call(host.s, 'adminHs', { cmd: 'start', searchSec: 60 })).ok, '운영자가 숨바꼭질 시작');
 const hst = await hidingSeen;
-check(!!hst && hst.hostId === null, '숨는 단계: 참가자에게는 학회장이 누구인지도 보내지 않음');
+check(!!hst && hst.hostId === null, '숨는 단계: 참가자에게는 운영자가 누구인지도 보내지 않음');
 check(!!(await dispHidden), '숨바꼭질 중 닉네임·팀 표시 자동 숨김');
 check(!(await call(host.s, 'adminHs', { cmd: 'start' })).ok, '진행 중 중복 시작 방지');
 // 참가자는 움직일 수 없음
 const frozenCx = waitFor<boolean>((dn) => e.s.once('cx', () => dn(true)));
 e.s.emit('m', [e.pos.x + 3, e.pos.y, 3, 1]);
 check(!!(await frozenCx), '블라인드 중 참가자 이동은 서버가 막음');
-check(((await call(e.s, 'act', { t: 'slide' })) as { reason?: string }).reason === '학회장이 숨는 중이에요!', '블라인드 중 상호작용 제한');
+check(((await call(e.s, 'act', { t: 'slide' })) as { reason?: string }).reason === '운영자가 숨는 중이에요!', '블라인드 중 상호작용 제한');
 check(!(await call(e.s, 'chat', { ch: 'all', text: '어디야' })).ok, '블라인드 중 채팅 제한');
-// 학회장은 이동 (숨을 곳으로)
+// 운영자는 이동 (숨을 곳으로)
 const hideTarget = WORLD.collision.nearest(WORLD.spawn.x - 110, WORLD.spawn.y + 20, 40)!; // 광장 밖 (리스폰 위치와 충분히 떨어진 곳)
 const hostMoved = await walk(host, hideTarget.x, hideTarget.y);
-check(hostMoved, '학회장은 숨는 동안 이동 가능');
+check(hostMoved, '운영자는 숨는 동안 이동 가능');
 await sleep(3300); // 3초마다 오는 전체 위치 보정에도 섞이지 않는지 확인
-check(leaks.length === 0, `숨는 동안 학회장 위치가 다른 참가자에게 전송되지 않음 (${leaks.length}건)`);
+check(leaks.length === 0, `숨는 동안 운영자 위치가 다른 참가자에게 전송되지 않음 (${leaks.length}건)`);
 const peek = (await call<JoinResult>(await connect(), 'spectate')) as unknown as { room: RoomSnapshot };
 const peekHost = peek.room.players.find((p) => p.id === host.id)!;
 check(Math.hypot(peekHost.x - host.pos.x, peekHost.y - host.pos.y) > 20, '관전·새로고침 스냅숏에도 숨은 위치 대신 출발 위치만 보임');
@@ -476,16 +476,16 @@ const searchSeen = waitFor<HsState>((dn) => observer.s.on('hs', (st) => st.phase
 const ePatched = waitFor<boolean>((dn) => e.s.on('pu', (id, p) => id === e.id && p.x !== undefined && dn(true)), 16000);
 const sst = await searchSeen;
 hiding = false;
-check(!!sst && sst.hostId === host.id, '15초 후 수색 시작 (서버 타이머) · 학회장 공개');
+check(!!sst && sst.hostId === host.id, '15초 후 수색 시작 (서버 타이머) · 운영자 공개');
 const spawnRect = WORLD.spawn;
 check(!!(await ePatched) && e.pos.x >= spawnRect.x - 20 && e.pos.x <= spawnRect.x + spawnRect.w + 20 && e.pos.y >= spawnRect.y - 20 && e.pos.y <= spawnRect.y + spawnRect.h + 20, '참가자는 중앙 광장으로 리스폰');
 await sleep(200);
 const hostCx = waitFor<boolean>((dn) => host.s.once('cx', () => dn(true)));
 host.s.emit('m', [host.pos.x + 3, host.pos.y, 3, 1]);
-check(!!(await hostCx), '수색 중 학회장은 움직일 수 없음');
+check(!!(await hostCx), '수색 중 운영자는 움직일 수 없음');
 check(!(await call(far.s, 'hsFind')).ok, '멀리서는 발견 불가 (서버 거리 검증)');
-check(!(await call(host.s, 'hsFind')).ok, '학회장 본인은 발견 요청 불가');
-// 두 참가자가 동시에 학회장 옆으로
+check(!(await call(host.s, 'hsFind')).ok, '운영자 본인은 발견 요청 불가');
+// 두 참가자가 동시에 운영자 옆으로
 const near1 = WORLD.collision.nearest(host.pos.x - 10, host.pos.y + 4, 20)!;
 const near2 = WORLD.collision.nearest(host.pos.x + 10, host.pos.y + 4, 20)!;
 await Promise.all([walk(e, near1.x, near1.y), walk(d, near2.x, near2.y)]);
@@ -494,7 +494,7 @@ const [r1, r2, r3] = await Promise.all([call(e.s, 'hsFind'), call(d.s, 'hsFind')
 const oks = [r1, r2, r3].filter((r) => r.ok).length;
 check(oks === 1, `동시에 '찾았다!!' → 서버가 최초 1명만 인정 (성공 ${oks}건)`);
 const fst = await foundSeen;
-check(!!fst?.winner && fst.winner.prize && !!fst.reveal && !!fst.winnerPos, '발견 이벤트 + 학회장·발견자 위치 전달 (카메라 연출용)');
+check(!!fst?.winner && fst.winner.prize && !!fst.reveal && !!fst.winnerPos, '발견 이벤트 + 운영자·발견자 위치 전달 (카메라 연출용)');
 const sum1 = await call<PrizeSummary>(adm, 'adminPrizes');
 const hsAwards = sum1.awards.filter((x) => x.pool === 'hideseek');
 check(hsAwards.length === 1 && hsAwards[0].itemName === '배달의민족 상품권' && hsAwards[0].nickname === fst!.winner!.nickname, '배달의민족 상품권 1장 당첨 기록 (서버 저장)');
@@ -505,11 +505,11 @@ const dispBack = waitFor<boolean>((dn) => observer.s.on('display', (dd) => dn(!d
 check((await call(adm, 'adminHs', { cmd: 'end' })).ok, '운영자 페이지에서 결과 연출 종료');
 check(!!(await dispBack), '종료 후 닉네임 표시 설정 복구');
 const badgeBack = (await call<JoinResult>(await connect(), 'spectate')) as unknown as { room: RoomSnapshot };
-check(badgeBack.room.players.find((p) => p.id === host.id)?.host === true && badgeBack.room.hs.phase === 'finished', '종료 후 학회장 배지 복구 · 결과 유지');
+check(badgeBack.room.players.find((p) => p.id === host.id)?.host === true && badgeBack.room.hs.phase === 'finished', '종료 후 운영자 배지 복구 · 결과 유지');
 
 // 2회차: 상품권은 다시 배정되지 않음
 const found2 = waitFor<HsState>((dn) => observer.s.on('hs', (st) => st.phase === 'found' && st.round === fst!.round + 1 && dn(st)), 30000);
-check((await call(adm, 'adminHs', { cmd: 'start', hostId: host.id, searchSec: 60 })).ok, '운영자 페이지에서 학회장을 골라 시작');
+check((await call(adm, 'adminHs', { cmd: 'start', hostId: host.id, searchSec: 60 })).ok, '운영자 페이지에서 운영자를 골라 시작');
 await waitFor((dn) => observer.s.on('hs', (st) => st.phase === 'searching' && dn(true)), 17000);
 await sleep(300);
 const n3 = WORLD.collision.nearest(host.pos.x, host.pos.y + 10, 20)!;
@@ -572,7 +572,7 @@ let hostEgg = false;
 observer.s.on('egg', (ev) => ev.winnerId === host.id && (hostEgg = true));
 await call(host.s, 'act', { t: 'secret' });
 await sleep(400);
-check(!hostEgg, '학회장 계정은 최초 달성 경쟁에서 제외');
+check(!hostEgg, '운영자 계정은 최초 달성 경쟁에서 제외');
 await call(adm, 'adminEggSet', { id: 'secret', need: 0 }).then((r) => check(!r.ok, '잘못된 조건값 거부'));
 const eggCsv = await fetch(`${URL}/api/admin/eggs.csv`, { headers: { Authorization: `Bearer ${login.token}` } });
 check(eggCsv.ok && (await eggCsv.text()).includes('비밀 발견자'), '획득 기록 CSV 내보내기');
@@ -596,7 +596,7 @@ check(
   '우수 PAIR 3팀 명단 고정 (매화·칠면조·트민녀들 + 팀원)',
 );
 const tampered = fixedTeams.map((t) => ({ ...t, name: '바꾼팀' }));
-check(!(await call(adm, 'adminPair', { op: 'save', teams: tampered })).ok && (await pairInfo()).teams[0].name === '매화', '팀 명단은 학회장도 바꿀 수 없음 (상품만 무작위)');
+check(!(await call(adm, 'adminPair', { op: 'save', teams: tampered })).ok && (await pairInfo()).teams[0].name === '매화', '팀 명단은 운영자도 바꿀 수 없음 (상품만 무작위)');
 const pi0 = await pairInfo();
 check(pi0.remaining.length === 3 && Object.keys(pi0.assigned).length === 0, '상품 3종 재고 확인 (빔프로젝터·말랑이·손난로)');
 const readySeen = waitFor<StageState>((dn) => observer.s.on('stage', (st) => st.mode === 'gacha' && st.phase === 'ready' && dn(st)));
@@ -630,13 +630,13 @@ await call(adm, 'adminPrizeSet', { op: 'paid', awardId: paidId, paid: false });
 
 // ==================================================================== 3차: 오늘의 행운은 누구에게?
 section('3차: 배민 상품권 랜덤 3명 추첨');
-const host2 = await joinBot('학회장둘', { role: 'senior', grade: 4 });
+const host2 = await joinBot('운영자둘', { role: 'senior', grade: 4 });
 await call(host2.s, 'adminAuth', { token: login.token });
 const dupe = await joinBot('같은사람', {}, observer.uid); // 같은 기기 키로 한 번 더 입장
 const li = await call<LuckyInfo>(adm, 'adminLuckyInfo');
 const hsWinnerName = sum2.awards.find((x) => x.pool === 'hideseek')?.nickname;
 check(li.alloc === 3 && li.need === 3, '랜덤 추첨 할당 3장 (숨바꼭질 1장과 별도)');
-check(!li.candidates.some((c) => c.id === host2.id), '학회장 계정은 추첨 대상에서 제외');
+check(!li.candidates.some((c) => c.id === host2.id), '운영자 계정은 추첨 대상에서 제외');
 check(li.excludeHsWinner && !li.candidates.some((c) => c.nickname === hsWinnerName), '기본값: 숨바꼭질 당첨자 제외');
 check(li.candidates.filter((c) => c.id === observer.id || c.id === dupe.id).length === 1, '같은 사람(기기)이 두 번 접속해도 후보는 한 번만');
 check(!(await call(far.s, 'adminLucky', { op: 'draw' })).ok, '일반 참가자는 추첨 조작 불가');
@@ -647,7 +647,7 @@ const sumL = await call<PrizeSummary>(adm, 'adminPrizes');
 const draws = sumL.awards.filter((x) => x.pool === 'draw');
 check(dr?.mode === 'lucky' && dr.winners.length === 3 && draws.length === 3 && new Set(draws.map((x) => x.ownerKey)).size === 3, '서로 다른 3명 당첨 · 서버 저장');
 check(dr?.mode === 'lucky' && dr.winners.every((w, i) => w.nickname === draws[i].nickname), '화면 공개 순서 = 서버 당첨 결과');
-check(!draws.some((x) => x.nickname === hsWinnerName || x.playerId === host2.id), '당첨자 중 학회장·숨바꼭질 당첨자 없음');
+check(!draws.some((x) => x.nickname === hsWinnerName || x.playerId === host2.id), '당첨자 중 운영자·숨바꼭질 당첨자 없음');
 for (let i = 0; i < 3; i++) await call(adm, 'adminLucky', { op: 'reveal' });
 check(!(await call(adm, 'adminLucky', { op: 'reveal' })).ok, '3명 공개 후 추가 공개 없음');
 check(!(await call(adm, 'adminLucky', { op: 'draw' })).ok, '상품권 3장을 모두 배정하면 추가 추첨 불가 (중복 지급 방지)');
@@ -695,12 +695,12 @@ async function rwalk(b: Bot, tx: number, ty: number) {
 await call(adm, 'adminRaid', { op: 'close' });
 check(!(await call(far.s, 'adminRaid', { op: 'open' })).ok, '일반 참가자는 레이드 조작 불가');
 check((await call(adm, 'adminRaid', { op: 'open' })).ok && (await until(() => raidSt?.phase === 'lobby')), '대기실 열기 → 모두에게 초대');
-const host3 = await joinBot('학회장셋', { role: 'senior', grade: 4 });
+const host3 = await joinBot('운영자셋', { role: 'senior', grade: 4 });
 await call(host3.s, 'adminAuth', { token: login.token });
-check(!(await call(host3.s, 'raidJoin')).ok, '학회장 계정은 전투 인원에서 제외');
+check(!(await call(host3.s, 'raidJoin')).ok, '운영자 계정은 전투 인원에서 제외');
 for (const b of [observer, d, e, far]) await call(b.s, 'raidJoin');
 check(await until(() => raidSt?.joined.length === 4), '참가자 4명 대기실 입장');
-check((await call(adm, 'adminRaid', { op: 'start' })).ok && (await until(() => raidSt?.phase === 'countdown')), '학회장이 시작 → 3초 카운트다운');
+check((await call(adm, 'adminRaid', { op: 'start' })).ok && (await until(() => raidSt?.phase === 'countdown')), '운영자가 시작 → 3초 카운트다운');
 check(await until(() => raidSt?.phase === 'battle', 5000), '전투 시작 · 보스 등장');
 const max0 = raidSt!.boss.max;
 check(max0 > 0 && raidSt!.players.length === 4, `참가 인원에 맞춘 보스 체력 (${max0})`);

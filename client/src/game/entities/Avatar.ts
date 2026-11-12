@@ -510,7 +510,7 @@ export class Avatar {
     }
   }
 
-  /** 숨바꼭질: 관전 화면에서 숨은 학회장을 감춤 */
+  /** 숨바꼭질: 관전 화면에서 숨은 운영자를 감춤 */
   concealed = false;
   setConcealed(v: boolean) {
     if (this.concealed === v) return;

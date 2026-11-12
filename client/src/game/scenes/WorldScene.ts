@@ -1,7 +1,7 @@
 /**
  * 메인 광장 씬: 맵 렌더링, 내 캐릭터 이동/전송, 다른 참가자 보간, 카메라,
  * 푸드트럭·온천·게시판 상호작용 감지.
- * mode 'player' = 참가자 화면 / 'screen' = 학회장 관전 화면
+ * mode 'player' = 참가자 화면 / 'screen' = 운영자 관전 화면
  */
 import Phaser from 'phaser';
 import { BATH_SPEED, CAMPFIRE_R, MOVE_SPEED, SEAT_RANGE, SEND_HZ, WORLD_H, WORLD_W } from '../../../../shared/constants';
@@ -41,7 +41,7 @@ export interface InteractState {
   player: { id: number; name: string; d: number } | null;
   following: number | null;
   sliding: boolean;
-  /** 숨바꼭질: 학회장 바로 옆 → '찾았다!!' */
+  /** 숨바꼭질: 운영자 바로 옆 → '찾았다!!' */
   findHost: boolean;
   /** 이스터에그: 비밀 오브젝트 근처 */
   secret: boolean;
@@ -108,7 +108,7 @@ export class WorldScene extends Phaser.Scene {
   private swingRigs: { id: string; x: number; restY: number; pivotY: number; base: number; seat: Phaser.GameObjects.Image; theta: number }[] = [];
   private swingGfx: Phaser.GameObjects.Graphics | null = null;
   private showTeams = true;
-  /** 이벤트 연출용 카메라 목표 (발견 장면: 학회장 + 발견자). 관전 화면은 기존 관전 카메라가 이 목표를 따라감 */
+  /** 이벤트 연출용 카메라 목표 (발견 장면: 운영자 + 발견자). 관전 화면은 기존 관전 카메라가 이 목표를 따라감 */
   private focus: { x: number; y: number }[] | null = null;
   private focusZoom = 0;
 
@@ -596,7 +596,7 @@ export class WorldScene extends Phaser.Scene {
     else if (this.focus) this.updatePlayerFocus(dt);
     else this.focusZoom = 0;
 
-    // 관전 화면: 수색 중에는 숨은 학회장을 비추지 않음 (빔프로젝터로 위치가 드러나지 않게)
+    // 관전 화면: 수색 중에는 숨은 운영자를 비추지 않음 (빔프로젝터로 위치가 드러나지 않게)
     const hs = store.hs;
     const conceal = this.ctx.mode === 'screen' && hs.phase === 'searching' ? hs.hostId : null;
     for (const [id, a] of this.avatars) a.setConcealed(id === conceal);

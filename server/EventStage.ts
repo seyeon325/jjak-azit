@@ -5,7 +5,7 @@
  *     · 가챠 연출이 시작되기 전에 서버가 상품을 확정·기록 (화면은 확정된 결과를 공개만 함)
  *     · 이미 배정된 상품은 남은 후보에서 빠짐, 마지막 팀은 남은 상품
  *  B. 오늘의 행운은 누구에게? — 접속 중인 일반 참가자 중 서로 다른 3명에게 배민 상품권
- *     · 시작 순간 후보 확정 → 서버가 당첨자 확정·기록 → 학회장이 한 명씩 공개
+ *     · 시작 순간 후보 확정 → 서버가 당첨자 확정·기록 → 운영자가 한 명씩 공개
  *
  * 두 이벤트는 대상(팀 / 개인)·상품·기록이 완전히 분리되어 있습니다.
  */
@@ -115,7 +115,7 @@ export class EventStage {
     return null;
   }
 
-  /** 재추첨: 이 팀의 배정을 취소해 상품을 남은 후보로 되돌림 (학회장 확인 후) */
+  /** 재추첨: 이 팀의 배정을 취소해 상품을 남은 후보로 되돌림 (운영자 확인 후) */
   redrawTeam(teamId: string): string | null {
     const a = this.pairAward(teamId);
     if (!a) return '아직 추첨하지 않은 팀이에요.';
@@ -155,7 +155,7 @@ export class EventStage {
     return new Set(this.d.prizes.data.awards.filter((a) => a.pool === 'hideseek').map((a) => a.ownerKey));
   }
 
-  /** 지금 추첨 대상: 접속 중 · 학회장 아님 · 같은 사람(기기) 중복 없음 · 이미 당첨 아님 */
+  /** 지금 추첨 대상: 접속 중 · 운영자 아님 · 같은 사람(기기) 중복 없음 · 이미 당첨 아님 */
   candidates() {
     const sessions = new Map(this.d.sessions().map((s) => [s.playerId, s]));
     const drawn = new Set(this.d.prizes.data.awards.filter((a) => a.pool === 'draw').map((a) => a.ownerKey));
@@ -217,7 +217,7 @@ export class EventStage {
   }
   private winnerIds: number[] = [];
 
-  /** 다음 당첨자 공개 (학회장이 타이밍 조절) */
+  /** 다음 당첨자 공개 (운영자가 타이밍 조절) */
   luckyReveal(): string | null {
     const s = this.st;
     if (s.mode !== 'lucky' || s.phase !== 'drawn') return '먼저 추첨을 시작해주세요.';

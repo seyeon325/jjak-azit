@@ -1,7 +1,7 @@
 /**
  * 짝선짝후 아지트 — 실시간 서버
- *  - HTTP: 빌드된 클라이언트 정적 파일, /api/info, 학회장 로그인·CSV 내보내기
- *  - WebSocket(Socket.IO): 입장·재접속·이동·음식·온천·좌석·놀이기구·채팅·게시판·학회장 기능
+ *  - HTTP: 빌드된 클라이언트 정적 파일, /api/info, 운영자 로그인·CSV 내보내기
+ *  - WebSocket(Socket.IO): 입장·재접속·이동·음식·온천·좌석·놀이기구·채팅·게시판·운영자 기능
  */
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -45,7 +45,7 @@ const NOTE_COOLDOWN_MS = 8000;
 const COMMENT_COOLDOWN_MS = 3000;
 const ADMIN_TTL_MS = 12 * 60 * 60 * 1000;
 
-// 학회장 비밀번호 — 코드·저장소에는 절대 적지 않고 호스팅 환경변수로만 받음 (문자열 그대로: 앞자리 0 유지)
+// 운영자 비밀번호 — 코드·저장소에는 절대 적지 않고 호스팅 환경변수로만 받음 (문자열 그대로: 앞자리 0 유지)
 //  1) ADMIN_PASSWORD_HASH = scrypt$<salt>$<hash>  (권장: npm run hashpw 로 만든 값)
 //  2) ADMIN_PASSWORD      = 비밀번호 문자열       (서버가 켜질 때 해시로 바꿔 두고, 비교는 해시로만)
 //  3) 둘 다 없으면 서버가 켜질 때마다 임시 비밀번호를 만들어 서버 로그에만 표시 (개발용)
@@ -56,7 +56,7 @@ const ADMIN_SOURCE: 'hash' | 'env' | 'temp' = parseAdminHash(ENV_HASH) ? 'hash' 
 const ADMIN_KEY = (() => {
   const parsed = parseAdminHash(ENV_HASH);
   if (parsed) return parsed;
-  if (ENV_HASH) console.warn('[학회장] ADMIN_PASSWORD_HASH 형식이 올바르지 않아요. (scrypt$솔트$해시) — ADMIN_PASSWORD 를 대신 사용합니다.');
+  if (ENV_HASH) console.warn('[운영자] ADMIN_PASSWORD_HASH 형식이 올바르지 않아요. (scrypt$솔트$해시) — ADMIN_PASSWORD 를 대신 사용합니다.');
   const salt = randomBytes(16);
   return { salt, hash: scryptSync(ENV_PW || TEMP_PW, salt, 32) };
 })();
@@ -89,7 +89,7 @@ function adminTokenValid(token: unknown): boolean {
   return true;
 }
 
-/** 로그아웃: 그 토큰으로 얻은 학회장 권한을 바로 회수 (아바타의 학회장 표시도 해제) */
+/** 로그아웃: 그 토큰으로 얻은 운영자 권한을 바로 회수 (아바타의 운영자 표시도 해제) */
 function revokeAdmin(token: string) {
   if (!token) return;
   for (const s of io.sockets.sockets.values()) {
@@ -141,7 +141,7 @@ app.get('/api/info', (_req, res) => {
   });
 });
 
-// 학회장 로그인 시도 제한: 같은 기기(IP) 1분 8번 · 서버 전체 실패 1분 40번
+// 운영자 로그인 시도 제한: 같은 기기(IP) 1분 8번 · 서버 전체 실패 1분 40번
 const loginTries = new Map<string, number[]>();
 let globalFails: number[] = [];
 app.post('/api/admin/login', (req, res) => {
@@ -161,7 +161,7 @@ app.post('/api/admin/login', (req, res) => {
   loginTries.delete(ip);
   const token = randomBytes(24).toString('hex');
   adminTokens.set(token, now + ADMIN_TTL_MS);
-  log('학회장 로그인');
+  log('운영자 로그인');
   res.json({ ok: true, token, expiresAt: now + ADMIN_TTL_MS });
 });
 
@@ -174,14 +174,14 @@ app.post('/api/admin/logout', (req, res) => {
 
 app.get('/api/admin/export.csv', (req, res) => {
   const t = String(req.get('authorization') ?? '').replace(/^Bearer /, '');
-  if (!adminTokenValid(t)) return res.status(401).send('학회장 로그인이 필요해요.');
+  if (!adminTokenValid(t)) return res.status(401).send('운영자 로그인이 필요해요.');
   const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="jjak-azit-board-${stamp}.csv"`);
   res.send(board.toCSV());
 });
 
-// 이스터에그 기록 · 상품 당첨 기록 내보내기 (학회장만)
+// 이스터에그 기록 · 상품 당첨 기록 내보내기 (운영자만)
 for (const [route, name, csv] of [
   ['/api/admin/eggs.csv', 'eggs', () => eggs.toCSV()],
   ['/api/admin/prizes.csv', 'prizes', () => prizes.toCSV()],
@@ -189,7 +189,7 @@ for (const [route, name, csv] of [
 ] as const) {
   app.get(route, (req, res) => {
     const t = String(req.get('authorization') ?? '').replace(/^Bearer /, '');
-    if (!adminTokenValid(t)) return res.status(401).send('학회장 로그인이 필요해요.');
+    if (!adminTokenValid(t)) return res.status(401).send('운영자 로그인이 필요해요.');
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="jjak-azit-${name}-${stamp}.csv"`);
@@ -285,16 +285,16 @@ const raid = new RaidGame(
   path.join(DATA_DIR, 'raid.json'),
 );
 
-// ------------------------------------------------------------------ 학회장을 찾아라!
+// ------------------------------------------------------------------ 운영자를 찾아라!
 
 const hs = new HideSeek({
   plaza,
   prizes,
   broadcast: (st) => {
     io.to(plaza.channel).emit('hs', st);
-    // 학회장 화면(관전 소켓)에는 학회장 정보가 포함된 상태를 따로 보냄
+    // 운영자 화면(관전 소켓)에는 운영자 정보가 포함된 상태를 따로 보냄
     for (const s of io.sockets.sockets.values()) if ((s as IOSocket).data.admin && !(s as IOSocket).data.token) s.emit('hs', hs.adminState());
-    // 학회장 본인은 자기가 학회장인 걸 알아야 함
+    // 운영자 본인은 자기가 운영자인 걸 알아야 함
     if (hs.hostId !== null) plaza.hooks.emitTo(hs.hostId, 'hs', hs.adminState());
   },
   displayChanged: () => io.to(plaza.channel).emit('display', effectiveDisplay()),
@@ -305,7 +305,7 @@ const hs = new HideSeek({
 });
 plaza.rules = hs;
 
-/** 학회장이 정한 화면 설정 + 숨바꼭질 중 강제 설정 (원래 설정은 그대로 보관 → 끝나면 자동 복원) */
+/** 운영자가 정한 화면 설정 + 숨바꼭질 중 강제 설정 (원래 설정은 그대로 보관 → 끝나면 자동 복원) */
 function effectiveDisplay(): DisplaySettings {
   return hs.overrideDisplay(settings.data.display);
 }
@@ -321,7 +321,7 @@ function eggStat(playerId: number, key: StatKey, n = 1) {
 function eggProgress(playerId: number, id: EggId, n: number) {
   const s = sessions.byPlayer(playerId);
   const info = plaza.get(playerId);
-  if (!s || !info || s.admin) return; // 학회장 계정은 최초 달성 경쟁에서 제외
+  if (!s || !info || s.admin) return; // 운영자 계정은 최초 달성 경쟁에서 제외
   if (eggs.add(s.ownerKey, id, n)) awardEgg(playerId, s, id);
 }
 
@@ -374,7 +374,7 @@ function attach(socket: IOSocket, session: Session) {
   sessions.cancelGrace(session);
   session.socketId = socket.id;
   socket.data.token = session.token;
-  // 학회장은 재접속해도 권한 유지 (로그인이 만료·로그아웃되지 않았을 때만)
+  // 운영자는 재접속해도 권한 유지 (로그인이 만료·로그아웃되지 않았을 때만)
   if (session.admin && adminTokenValid(session.adminToken)) {
     socket.data.admin = true;
     socket.data.adminToken = session.adminToken;
@@ -404,7 +404,7 @@ function me(socket: IOSocket): { session: Session; info: PlayerInfo } | null {
   return session && info ? { session, info } : null;
 }
 
-/** 게시판 쓰기·수정·삭제·하트·댓글은 게시판 근처에서만 (서버 위치로 판정, 통신 지연 여유 24px). 학회장 관리 기능은 별도 이벤트라 제한 없음 */
+/** 게시판 쓰기·수정·삭제·하트·댓글은 게시판 근처에서만 (서버 위치로 판정, 통신 지연 여유 24px). 운영자 관리 기능은 별도 이벤트라 제한 없음 */
 const BOARD_REACH = WORLD.spots.board.r + 24;
 function boardFar(info: PlayerInfo): string | null {
   const b = WORLD.spots.board;
@@ -432,7 +432,7 @@ function cooldownLeft(map: Map<string, number>, key: string, ms: number) {
   return 0;
 }
 
-const NO_AUTH = { ok: false as const, reason: '학회장 로그인이 필요해요.' };
+const NO_AUTH = { ok: false as const, reason: '운영자 로그인이 필요해요.' };
 const NOT_IN = { ok: false as const, reason: '아지트에 입장한 뒤 이용할 수 있어요.' };
 
 io.on('connection', (rawSocket) => {
@@ -579,7 +579,7 @@ io.on('connection', (rawSocket) => {
     if (!m) return ack({ ok: false, reason: '아지트에 입장한 뒤 쪽지를 남길 수 있어요.' });
     const far = boardFar(m.info);
     if (far) return ack({ ok: false, reason: far });
-    if (settings.isMuted(m.session.ownerKey)) return ack({ ok: false, reason: '학회장이 글쓰기를 잠시 제한했어요.' });
+    if (settings.isMuted(m.session.ownerKey)) return ack({ ok: false, reason: '운영자가 글쓰기를 잠시 제한했어요.' });
     const text = sanitizeNote(payload?.text, NOTE_MAX);
     if (!text) return ack({ ok: false, reason: '쪽지 내용을 입력해주세요.' });
     const wait = cooldownLeft(lastNoteAt, m.session.ownerKey, NOTE_COOLDOWN_MS);
@@ -643,7 +643,7 @@ io.on('connection', (rawSocket) => {
     if (!m) return ack(NOT_IN);
     const far = boardFar(m.info);
     if (far) return ack({ ok: false, reason: far });
-    if (settings.isMuted(m.session.ownerKey)) return ack({ ok: false, reason: '학회장이 글쓰기를 잠시 제한했어요.' });
+    if (settings.isMuted(m.session.ownerKey)) return ack({ ok: false, reason: '운영자가 글쓰기를 잠시 제한했어요.' });
     const text = sanitizeText(payload?.text, COMMENT_MAX);
     if (!text) return ack({ ok: false, reason: '댓글 내용을 입력해주세요.' });
     const wait = cooldownLeft(lastCommentAt, m.session.ownerKey, COMMENT_COOLDOWN_MS);
@@ -685,18 +685,18 @@ io.on('connection', (rawSocket) => {
     ack({ ok: true });
   });
 
-  // ---------------------------------------------------------------- 학회장
+  // ---------------------------------------------------------------- 운영자
 
   socket.on('adminAuth', (payload, ack) => {
     if (typeof ack !== 'function') return;
-    if (!adminTokenValid(payload?.token)) return ack({ ok: false, reason: '학회장 로그인이 만료됐어요. 다시 로그인해주세요.' });
+    if (!adminTokenValid(payload?.token)) return ack({ ok: false, reason: '운영자 로그인이 만료됐어요. 다시 로그인해주세요.' });
     socket.data.admin = true;
     socket.data.adminToken = payload.token as string;
     const m = me(socket);
     if (m) {
       m.session.adminToken = payload.token as string;
-      // 참가자 화면에서 로그인 = 학회장 아바타 (아바타 + 관리자 권한)
-      if (!m.session.admin) log(`학회장 로그인: ${m.info.nickname} (#${m.info.id})`);
+      // 참가자 화면에서 로그인 = 운영자 아바타 (아바타 + 관리자 권한)
+      if (!m.session.admin) log(`운영자 로그인: ${m.info.nickname} (#${m.info.id})`);
       m.session.admin = true;
       if (!(hs.active && hs.hostId === m.info.id)) plaza.patch(m.info.id, { host: true, title: null });
       if (hs.hostId === m.info.id) socket.emit('hs', hs.adminState());
@@ -708,7 +708,7 @@ io.on('connection', (rawSocket) => {
     ack({ ok: true });
   });
 
-  // ---------------------------------------------------------------- 학회장을 찾아라!
+  // ---------------------------------------------------------------- 운영자를 찾아라!
 
   socket.on('hsFind', (ack) => {
     if (typeof ack !== 'function') return;
@@ -724,7 +724,7 @@ io.on('connection', (rawSocket) => {
     const cmd = payload?.cmd;
     let r: string | null = null;
     if (cmd === 'start') {
-      // 참가자 화면에서 학회장 로그인한 사람이 시작하면 본인이 학회장, 학회장 페이지에서는 고른 학회장
+      // 참가자 화면에서 운영자 로그인한 사람이 시작하면 본인이 운영자, 운영자 페이지에서는 고른 운영자
       const self = me(socket);
       const hostId = self?.session.admin ? self.session.playerId : Number(payload?.hostId);
       const sec = payload?.searchSec === undefined ? undefined : Number(payload.searchSec);
@@ -1022,7 +1022,7 @@ io.on('connection', (rawSocket) => {
     const r = board.remove(id, null);
     if (r !== true) return ack({ ok: false, reason: r });
     io.to(plaza.channel).emit('bd', id);
-    log(`학회장이 쪽지 #${id} 삭제`);
+    log(`운영자가 쪽지 #${id} 삭제`);
     ack({ ok: true });
   });
 
@@ -1070,9 +1070,9 @@ httpServer.listen(PORT, () => {
   if (IS_PROD) for (const u of lanUrls(PORT)) console.log(`  - 같은 Wi-Fi: ${u}`);
   if (PUBLIC_URL) console.log(`  - 공개 주소: ${PUBLIC_URL}`);
   // 실제 비밀번호는 로그에 출력하지 않음 (임시 개발용 비밀번호만 표시)
-  if (ADMIN_SOURCE === 'hash') console.log('  - 학회장 페이지: /admin (ADMIN_PASSWORD_HASH 환경변수로 확인)');
-  else if (ADMIN_SOURCE === 'env') console.log('  - 학회장 페이지: /admin (ADMIN_PASSWORD 환경변수의 비밀번호)');
-  else console.log(`  - 학회장 페이지: /admin  임시 비밀번호: ${TEMP_PW}  (재시작하면 바뀜 — ADMIN_PASSWORD 를 설정하세요)`);
+  if (ADMIN_SOURCE === 'hash') console.log('  - 운영자 페이지: /admin (ADMIN_PASSWORD_HASH 환경변수로 확인)');
+  else if (ADMIN_SOURCE === 'env') console.log('  - 운영자 페이지: /admin (ADMIN_PASSWORD 환경변수의 비밀번호)');
+  else console.log(`  - 운영자 페이지: /admin  임시 비밀번호: ${TEMP_PW}  (재시작하면 바뀜 — ADMIN_PASSWORD 를 설정하세요)`);
   console.log('');
 });
 

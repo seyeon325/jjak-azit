@@ -1,7 +1,7 @@
 /**
- * 학회장 페이지 (/admin)
+ * 운영자 페이지 (/admin)
  *  - 비밀번호 로그인 → 서버가 발급한 토큰으로 소켓 권한 확인 (비밀번호는 클라이언트 코드에 없음)
- *  - 오른쪽 패널 + 항상 보이는 '학회장 메뉴' 버튼 (패널을 접어도 버튼은 화면에 남음)
+ *  - 오른쪽 패널 + 항상 보이는 '운영자 메뉴' 버튼 (패널을 접어도 버튼은 화면에 남음)
  *  - 메뉴는 SECTIONS 목록 하나로 관리 → 3차(랜덤 추첨·레이드·시상식)는 항목만 추가하면 됨
  *
  * [이전 오류 원인] 접기 버튼이 패널 머리줄 오른쪽 끝에 있었는데, 접으면 패널이 오른쪽으로 밀려나
@@ -48,7 +48,7 @@ export function clearAdminToken() {
 /** 로그인 화면. 성공하면 토큰을 돌려줌 */
 export function adminLogin(app: HTMLElement): Promise<string> {
   return new Promise((resolve) => {
-    const pw = h('input', { type: 'password', placeholder: '학회장 비밀번호', autocomplete: 'current-password' });
+    const pw = h('input', { type: 'password', placeholder: '운영자 비밀번호', autocomplete: 'current-password' });
     const msg = h('p', { class: 'login-msg' });
     const btn = h('button', { type: 'submit', class: 'btn-primary' }, '로그인');
     const el = h(
@@ -79,7 +79,7 @@ export function adminLogin(app: HTMLElement): Promise<string> {
             }
           },
         },
-        h('header', { class: 'login-head' }, logoMark('logo-mark big'), h('h1', {}, '학회장 페이지'), h('p', {}, '짝선짝후 아지트 관리')),
+        h('header', { class: 'login-head' }, logoMark('logo-mark big'), h('h1', {}, '운영자 페이지'), h('p', {}, '짝선짝후 아지트 관리')),
         h('section', { class: 'step' }, h('div', { class: 'nick-field' }, pw)),
         btn,
         msg,
@@ -101,7 +101,7 @@ const SECTIONS: { id: SectionId; label: string; short: string }[] = [
   { id: 'notice', label: '전체 공지', short: '공지' },
   { id: 'camera', label: '관전 카메라 · 빔프로젝터 화면', short: '카메라' },
   { id: 'photo', label: '단체 사진 모드', short: '단체 사진' },
-  { id: 'hs', label: '학회장을 찾아라!', short: '숨바꼭질' },
+  { id: 'hs', label: '운영자를 찾아라!', short: '숨바꼭질' },
   { id: 'pair', label: '우수 PAIR 경품 가챠', short: 'PAIR 가챠' },
   { id: 'lucky', label: '오늘의 행운은 누구에게? (배민 3명)', short: '행운 추첨' },
   { id: 'raid', label: '과제 괴물을 물리쳐라! (레이드)', short: '레이드' },
@@ -142,15 +142,15 @@ export class AdminPanel {
     private onLogout: () => void,
   ) {
     this.body = h('div', { class: 'admin-body' });
-    this.nav = h('nav', { class: 'admin-nav', 'aria-label': '학회장 메뉴' });
+    this.nav = h('nav', { class: 'admin-nav', 'aria-label': '운영자 메뉴' });
     this.titleEl = h('span', { class: 'admin-sec-title' });
     this.panel = h(
       'aside',
-      { class: 'admin-panel', 'aria-label': '학회장 패널' },
+      { class: 'admin-panel', 'aria-label': '운영자 패널' },
       h(
         'div',
         { class: 'admin-head' },
-        h('b', {}, '학회장'),
+        h('b', {}, '운영자'),
         this.titleEl,
         h('button', { type: 'button', class: 'icon-btn small', 'aria-label': '패널 접기', title: '패널 접기 (A)', onclick: () => this.setOpen(false) }, icon('close')),
       ),
@@ -158,7 +158,7 @@ export class AdminPanel {
       this.body,
     );
     // 패널 밖에 있는 고정 버튼: 접혀 있을 때 언제든 다시 열 수 있음
-    this.fab = h('button', { type: 'button', class: 'admin-fab hidden', 'aria-label': '학회장 메뉴 열기', onclick: () => this.setOpen(true) }, icon('menu'), h('span', {}, '학회장 메뉴'));
+    this.fab = h('button', { type: 'button', class: 'admin-fab hidden', 'aria-label': '운영자 메뉴 열기', onclick: () => this.setOpen(true) }, icon('menu'), h('span', {}, '운영자 메뉴'));
     this.el = h('div', { class: 'admin-root' }, this.panel, this.fab);
 
     const later = () => {
@@ -334,7 +334,7 @@ export class AdminPanel {
         'div',
         { class: 'dash-grid' },
         card('지금 접속', `${all.length}명`, `선배 ${all.filter((p) => p.role === 'senior').length} · 후배 ${all.filter((p) => p.role === 'junior').length}`, 'people'),
-        card('학회장을 찾아라!', HS_PHASE_LABEL[st.phase], st.round ? `${st.round}회차${st.winner ? ` · ${st.winner.nickname}` : ''}` : '아직 시작 전', 'hs'),
+        card('운영자를 찾아라!', HS_PHASE_LABEL[st.phase], st.round ? `${st.round}회차${st.winner ? ` · ${st.winner.nickname}` : ''}` : '아직 시작 전', 'hs'),
         card('이스터에그', `${found} / ${this.eggs.length || 8}`, '최초 달성자가 나온 업적', 'eggs'),
         card(
           '배달의민족 상품권',
@@ -348,7 +348,7 @@ export class AdminPanel {
         card('게시판', `${this.notes.length}개`, '쪽지', 'board'),
         card('화면 표시', this.store.display.photo ? '단체 사진 중' : '평소', this.store.display.hideNames ? '닉네임 숨김' : '닉네임 표시', 'photo'),
       ),
-      h('p', { class: 'muted small' }, '카드를 누르면 해당 메뉴로 이동해요. 패널은 오른쪽 위 ✕ 또는 A 키로 접고, ‘학회장 메뉴’ 버튼으로 다시 열 수 있어요.'),
+      h('p', { class: 'muted small' }, '카드를 누르면 해당 메뉴로 이동해요. 패널은 오른쪽 위 ✕ 또는 A 키로 접고, ‘운영자 메뉴’ 버튼으로 다시 열 수 있어요.'),
     );
   }
 
@@ -379,7 +379,7 @@ export class AdminPanel {
           h(
             'div',
             { class: 'who' },
-            h('b', {}, p.nickname, isHost ? h('em', { class: 'host-tag' }, '학회장') : null),
+            h('b', {}, p.nickname, isHost ? h('em', { class: 'host-tag' }, '운영자') : null),
             h('small', {}, `${gradeLabel(p.grade, p.gradeText)} · ${roleLabel(p.role)}${p.status === 'away' ? ' · 연결 끊김' : ''}`),
           ),
           sel,
@@ -499,11 +499,11 @@ export class AdminPanel {
       b('모두 따라가기 (2)', () => this.hud.cam('follow')),
       b('자유 카메라 (3) · 끌어서 이동, 휠로 확대', () => this.hud.cam('free')),
       b('참가자 추적 목록 열기 (L)', () => this.hud.toggleList()),
-      h('p', { class: 'muted small' }, '특정 참가자는 ‘접속자 관리’의 추적 버튼으로도 따라갈 수 있어요. 숨바꼭질 수색 중에는 관전 화면에 숨은 학회장이 보이지 않아요.'),
+      h('p', { class: 'muted small' }, '특정 참가자는 ‘접속자 관리’의 추적 버튼으로도 따라갈 수 있어요. 숨바꼭질 수색 중에는 관전 화면에 숨은 운영자가 보이지 않아요.'),
       h('h3', {}, '빔프로젝터 전용 화면'),
       b('관객용 화면 새 창으로 열기 (/screen)', () => window.open('/screen', 'azit-screen')),
       b('무대 화면(가챠·추첨) 닫기', () => void this.call('adminStage', { op: 'clear' })),
-      h('p', { class: 'muted small' }, '관객용 화면에는 학회장 버튼이 없어요. 가챠·추첨·레이드 장면은 여기서 조작하면 관객용 화면에 바로 반영돼요. 관객용 화면 오른쪽 아래 ‘소리’ 버튼(S 키)으로 효과음을 켜고 끌 수 있어요.'),
+      h('p', { class: 'muted small' }, '관객용 화면에는 운영자 버튼이 없어요. 가챠·추첨·레이드 장면은 여기서 조작하면 관객용 화면에 바로 반영돼요. 관객용 화면 오른쪽 아래 ‘소리’ 버튼(S 키)으로 효과음을 켜고 끌 수 있어요.'),
     );
   }
 
@@ -531,7 +531,7 @@ export class AdminPanel {
     );
   }
 
-  // -------------------------------------------------------------- 학회장을 찾아라!
+  // -------------------------------------------------------------- 운영자를 찾아라!
 
   private hsLeftText() {
     const st = this.store.hs;
@@ -571,7 +571,7 @@ export class AdminPanel {
         { class: `hs-state-card phase-${st.phase}` },
         h('div', {}, h('small', {}, '현재 상태'), h('strong', {}, HS_PHASE_LABEL[st.phase]), st.round ? h('span', {}, `${st.round}회차`) : null),
         h('div', {}, h('small', {}, '남은 시간'), h('strong', { 'data-hs-left': '1' }, this.hsLeftText())),
-        hostName ? h('div', {}, h('small', {}, '학회장'), h('strong', {}, hostName)) : null,
+        hostName ? h('div', {}, h('small', {}, '운영자'), h('strong', {}, hostName)) : null,
         st.winner ? h('div', {}, h('small', {}, '최초 발견자'), h('strong', {}, st.winner.nickname), h('span', {}, st.winner.prize ? '상품권 배정' : '상품권 할당 소진')) : null,
       ),
       active
@@ -586,11 +586,11 @@ export class AdminPanel {
             'div',
             { class: 'hs-start' },
             hosts.length
-              ? h('label', { class: 'field' }, h('span', {}, '숨을 학회장'), hostSel)
+              ? h('label', { class: 'field' }, h('span', {}, '숨을 운영자'), hostSel)
               : h(
                   'p',
                   { class: 'warn' },
-                  '학회장 아바타가 없어요. 휴대폰·PC의 참가자 화면(아지트 주소)에서 입장한 뒤, 메뉴 → 내 캐릭터 → ‘학회장 로그인’을 해주세요.',
+                  '운영자 아바타가 없어요. 휴대폰·PC의 참가자 화면(아지트 주소)에서 입장한 뒤, 메뉴 → 내 캐릭터 → ‘운영자 로그인’을 해주세요.',
                 ),
             h('label', { class: 'field' }, h('span', {}, `수색 시간(초, ${HS.minSearchSec}~${HS.maxSearchSec})`), sec),
             h('div', { class: 'row wrap' }, h('button', { type: 'button', class: 'btn-primary', disabled: !hosts.length, onclick: () => cmd('start') }, '숨바꼭질 시작'), st.phase !== 'ready' ? h('button', { type: 'button', class: 'btn-secondary', onclick: () => cmd('reset') }, '준비 상태로') : null),
@@ -598,9 +598,9 @@ export class AdminPanel {
       h(
         'ol',
         { class: 'muted small host-guide' },
-        h('li', {}, '시작하면 모든 참가자·관전 화면이 15초 동안 가려지고, 학회장 위치는 서버가 아무에게도 보내지 않아요.'),
-        h('li', {}, '15초 뒤 학회장 위치가 확정되고, 참가자는 중앙 광장에서 다시 출발해요.'),
-        h('li', {}, '학회장 옆에서 가장 먼저 ‘찾았다!!’를 누른 1명이 우승 → 배달의민족 상품권 1장이 기록돼요.'),
+        h('li', {}, '시작하면 모든 참가자·관전 화면이 15초 동안 가려지고, 운영자 위치는 서버가 아무에게도 보내지 않아요.'),
+        h('li', {}, '15초 뒤 운영자 위치가 확정되고, 참가자는 중앙 광장에서 다시 출발해요.'),
+        h('li', {}, '운영자 옆에서 가장 먼저 ‘찾았다!!’를 누른 1명이 우승 → 배달의민족 상품권 1장이 기록돼요.'),
         h('li', {}, '이미 상품권이 배정된 뒤에 다시 하면, 우승은 기록되지만 상품권은 중복 배정되지 않아요.'),
       ),
       h('h3', {}, '최근 회차'),
@@ -750,7 +750,7 @@ export class AdminPanel {
       { class: 'admin-screen' },
       h('div', { class: 'hs-state-card' }, h('div', {}, h('small', {}, '랜덤 추첨 할당'), h('strong', {}, `${info.alloc}장`)), h('div', {}, h('small', {}, '배정됨 / 남음'), h('strong', {}, `${info.used} / ${info.need}`)), h('div', {}, h('small', {}, '지금 추첨 대상'), h('strong', {}, `${info.candidates.length}명`))),
       h('label', { class: 'toggle' }, ex, h('span', {}, '숨바꼭질 당첨자는 추첨 대상에서 제외')),
-      h('p', { class: 'muted small' }, '대상: 지금 접속 중인 일반 참가자 (학회장·관전 화면 제외, 같은 기기는 한 번만, 이미 당첨된 사람 제외)'),
+      h('p', { class: 'muted small' }, '대상: 지금 접속 중인 일반 참가자 (운영자·관전 화면 제외, 같은 기기는 한 번만, 이미 당첨된 사람 제외)'),
       h('div', { class: 'chips' }, ...info.candidates.slice(0, 60).map((c) => h('span', { class: 'chip' }, c.nickname))),
       h(
         'div',
@@ -853,7 +853,7 @@ export class AdminPanel {
       h(
         'ol',
         { class: 'muted small host-guide' },
-        h('li', {}, '대기실을 열면 참가자 화면에 초대장이 떠요. ‘참여하기’를 누른 사람만 전투에 들어가요. (학회장 계정은 제외)'),
+        h('li', {}, '대기실을 열면 참가자 화면에 초대장이 떠요. ‘참여하기’를 누른 사람만 전투에 들어가요. (운영자 계정은 제외)'),
         h('li', {}, '보스 체력은 실제 참가 인원에 맞춰 정해져요. 제한 시간 4분 30초.'),
         h('li', {}, '빔프로젝터(/screen)에는 전투 화면이 자동으로 떠요.'),
       ),
@@ -1008,7 +1008,7 @@ export class AdminPanel {
           );
         }),
       ),
-      h('p', { class: 'muted small' }, '조건은 참가자에게 공개되지 않아요. 학회장 계정은 최초 달성 경쟁에서 제외돼요.'),
+      h('p', { class: 'muted small' }, '조건은 참가자에게 공개되지 않아요. 운영자 계정은 최초 달성 경쟁에서 제외돼요.'),
     );
   }
 

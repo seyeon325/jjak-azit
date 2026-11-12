@@ -890,7 +890,7 @@ function buildEffects() {
   save(CAT.fx, 'effect_heart_original', cv(buildHeart()).pad(1), '하트 (게임 원본)', '원본 추출');
   save(CAT.fx, 'effect_crumb_original', cv(buildCrumb()).pad(1), '부스러기 (게임 원본)', '원본 추출');
   // 숨바꼭질
-  save(CAT.fx, 'hs_title_frame', px(D.hideSeekFrame(240, 40)), '학회장을 찾아라! 제목 장식 (블라인드 줄무늬·엿보는 눈, 가운데 글자 자리)', '신규 제작', [1, 4]);
+  save(CAT.fx, 'hs_title_frame', px(D.hideSeekFrame(240, 40)), '운영자를 찾아라! 제목 장식 (블라인드 줄무늬·엿보는 눈, 가운데 글자 자리)', '신규 제작', [1, 4]);
   save(CAT.fx, 'hs_question', px(D.questionIcon()), '물음표 아이콘', '신규 제작');
   save(CAT.fx, 'hs_question_bubble', cv(buildEmote('question')).trim().pad(1), '물음표 말풍선 (게임 원본 이모티콘)', '원본 추출');
   save(CAT.fx, 'hs_magnifier', px(D.magnifier()).pad(1), '돋보기 아이콘', '신규 제작');

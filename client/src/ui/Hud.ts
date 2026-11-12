@@ -103,9 +103,9 @@ export class Hud {
     const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
     this.hostBtn = h(
       'button',
-      { class: 'icon-btn quick host hidden', type: 'button', 'aria-label': '학회장 메뉴', onclick: () => this.openHostSheet() },
+      { class: 'icon-btn quick host hidden', type: 'button', 'aria-label': '운영자 메뉴', onclick: () => this.openHostSheet() },
       h('span', { class: 'qi' }, '★'),
-      h('small', {}, '학회장'),
+      h('small', {}, '운영자'),
     );
 
     this.el = h(
@@ -174,7 +174,7 @@ export class Hud {
       ),
       store.on('info', (t) => this.toast(t, 'info')),
       store.on('notice', (t) => this.showNotice(t)),
-      store.on('muted', (m) => this.toast(m ? '학회장이 채팅을 잠시 제한했어요.' : '채팅 제한이 풀렸어요.', 'info')),
+      store.on('muted', (m) => this.toast(m ? '운영자가 채팅을 잠시 제한했어요.' : '채팅 제한이 풀렸어요.', 'info')),
       store.on('fireQ', (q) => this.renderFire(q)),
       store.on('display', () => this.applyDisplay()),
       store.on('reset', () => {
@@ -204,7 +204,7 @@ export class Hud {
     }
   }
 
-  /** 학회장(관리자 인증) 계정이 되면 학회장 버튼 표시 */
+  /** 운영자(관리자 인증) 계정이 되면 운영자 버튼 표시 */
   setHostAccount(v: boolean) {
     this.store.hostAccount = v;
     this.hostBtn.classList.toggle('hidden', !v);
@@ -233,7 +233,7 @@ export class Hud {
     } else this.toast(`${ev.nickname} 님이 숨겨진 업적 ‘${ev.title}’의 최초 달성자가 됐어요!`, 'info');
   }
 
-  // -------------------------------------------------------------- 학회장 메뉴 (숨바꼭질 진행)
+  // -------------------------------------------------------------- 운영자 메뉴 (숨바꼭질 진행)
 
   private hostBtn: HTMLElement;
   private hostSheet: Sheet | null = null;
@@ -242,7 +242,7 @@ export class Hud {
   private openHostSheet() {
     if (this.hostSheet?.isOpen) return;
     this.actionBar.suspend(true);
-    this.hostSheet = new Sheet(this.el, '학회장 메뉴', () => {
+    this.hostSheet = new Sheet(this.el, '운영자 메뉴', () => {
       this.actionBar.suspend(false);
       this.hostSheet = null;
     });
@@ -270,7 +270,7 @@ export class Hud {
       h(
         'div',
         { class: 'host-sheet' },
-        h('h3', {}, '학회장을 찾아라!'),
+        h('h3', {}, '운영자를 찾아라!'),
         h('p', { class: 'host-state' }, h('b', {}, HS_PHASE_LABEL[st.phase]), st.round ? ` · ${st.round}회차` : '', st.winner && !active ? ` · 지난 우승: ${st.winner.nickname}` : ''),
         active
           ? h('button', { type: 'button', class: 'btn-danger', onclick: () => run('end') }, st.phase === 'found' || st.phase === 'timeout' ? '결과 연출 끝내기' : '숨바꼭질 강제 종료')
@@ -286,23 +286,23 @@ export class Hud {
           h('li', {}, '시작하면 다른 모든 화면이 15초 동안 가려지고, 내 위치는 서버가 아무에게도 보내지 않아요.'),
           h('li', {}, '15초 안에 숨을 곳으로 이동하세요. 그 자리가 숨은 위치로 확정되고 움직일 수 없어요.'),
           h('li', {}, '참가자는 중앙 광장에서 출발해요. 가장 먼저 옆에서 ‘찾았다!!’를 누른 한 명이 우승해요.'),
-          h('li', {}, '당첨·상품 지급 기록은 학회장 페이지(/admin)에서 확인할 수 있어요.'),
+          h('li', {}, '당첨·상품 지급 기록은 운영자 페이지(/admin)에서 확인할 수 있어요.'),
         ),
       ),
     );
   }
 
-  // -------------------------------------------------------------- 학회장 로그인
+  // -------------------------------------------------------------- 운영자 로그인
 
   private hostLoginView() {
     if (this.store.hostAccount)
-      return h('p', { class: 'muted small host-on' }, '★ 학회장으로 로그인되어 있어요. 화면 오른쪽 ‘★ 학회장’ 버튼으로 숨바꼭질을 진행해요.');
-    const pw = h('input', { type: 'password', placeholder: '학회장 비밀번호', autocomplete: 'current-password' });
+      return h('p', { class: 'muted small host-on' }, '★ 운영자로 로그인되어 있어요. 화면 오른쪽 ‘★ 운영자’ 버튼으로 숨바꼭질을 진행해요.');
+    const pw = h('input', { type: 'password', placeholder: '운영자 비밀번호', autocomplete: 'current-password' });
     const msg = h('p', { class: 'muted small' });
     return h(
       'details',
       { class: 'host-login' },
-      h('summary', {}, '학회장 로그인 (운영진 전용)'),
+      h('summary', {}, '운영자 로그인 (운영진 전용)'),
       h(
         'form',
         {
@@ -318,7 +318,7 @@ export class Hud {
               const a = await this.net.req('adminAuth', { token: j.token });
               if (!a.ok) throw new Error(a.reason);
               this.setHostAccount(true);
-              this.toast('학회장으로 로그인했어요.', 'info');
+              this.toast('운영자로 로그인했어요.', 'info');
             } catch (err) {
               msg.textContent = (err as Error).message;
             }
@@ -497,7 +497,7 @@ export class Hud {
   }
 
   private showNotice(t: string) {
-    this.noticeEl.replaceChildren(h('b', {}, '학회장 공지'), h('span', {}, t));
+    this.noticeEl.replaceChildren(h('b', {}, '운영자 공지'), h('span', {}, t));
     this.noticeEl.classList.remove('hidden');
     clearTimeout(this.noticeTimer);
     this.noticeTimer = window.setTimeout(() => this.noticeEl.classList.add('hidden'), 8000);
@@ -821,8 +821,8 @@ export class Hud {
         }),
       ),
       TEAMS[me.team]
-        ? h('p', { class: 'team-line', style: `--tc:${TEAMS[me.team].color}` }, h('i', { html: teamSvg(TEAMS[me.team].symbol, '#fff') }), `${teamName(this.store, me.team)} · 팀은 학회장이 바꿀 수 있어요`)
-        : h('p', { class: 'muted small' }, '아직 팀이 없어요. 학회장이 배정해줄 거예요.'),
+        ? h('p', { class: 'team-line', style: `--tc:${TEAMS[me.team].color}` }, h('i', { html: teamSvg(TEAMS[me.team].symbol, '#fff') }), `${teamName(this.store, me.team)} · 팀은 운영자가 바꿀 수 있어요`)
+        : h('p', { class: 'muted small' }, '아직 팀이 없어요. 운영자가 배정해줄 거예요.'),
       h('p', { class: 'muted small' }, '새로고침하거나 잠깐 연결이 끊겨도 같은 캐릭터로 돌아올 수 있어요.'),
       this.store.hostAccount ? null : this.titlesView(),
       this.hostLoginView(),
