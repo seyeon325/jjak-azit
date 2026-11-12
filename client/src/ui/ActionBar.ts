@@ -18,6 +18,7 @@ export interface ActionHandlers {
   onPlayer: (id: number) => void;
   onFireChat: () => void;
   onUnfollow: () => void;
+  onFull: () => void;
   onFind: () => void;
   onSecret: () => void;
 }
@@ -32,8 +33,8 @@ interface Btn {
   d: number;
 }
 
-const SIT_LABEL: Record<string, string> = { bench: '앉기', log: '앉기', swing: '그네 타기', seesaw: '시소 타기', spring: '스프링 타기' };
-const STAND_LABEL: Record<string, string> = { bench: '일어나기', log: '일어나기', swing: '내리기', seesaw: '내리기', spring: '내리기' };
+const SIT_LABEL: Record<string, string> = { bench: '앉기', log: '앉기', table: '테이블에 앉기', swing: '그네 타기', seesaw: '시소 타기', spring: '스프링 타기' };
+const STAND_LABEL: Record<string, string> = { bench: '일어나기', log: '일어나기', table: '일어나기', swing: '내리기', seesaw: '내리기', spring: '내리기' };
 
 export class ActionBar {
   readonly el: HTMLElement;
@@ -85,6 +86,7 @@ export class ActionBar {
       if (s.nearSpring && !s.eating) btns.push({ id: 'bath', label: '온천 들어가기', kind: 'bath', d: 12, run: () => H.onBath(true) });
       if (s.nearBoard) btns.push({ id: 'board', label: '게시판', kind: 'board', d: 14, run: () => H.onBoard() });
       if (s.seat && !s.eating) btns.push({ id: `sit:${s.seat.id}`, label: SIT_LABEL[s.seat.kind] ?? '앉기', kind: 'sit', d: s.seat.d, run: () => H.onSit(s.seat!.id) });
+      if (s.tableFull) btns.push({ id: 'full', label: '테이블 만석 (4/4)', kind: 'out', d: 20, run: () => H.onFull() });
       if (s.push) btns.push({ id: `push:${s.push.seat}`, label: `밀기 (${s.push.name})`, kind: 'push', d: s.push.d - 4, run: () => H.onPush(s.push!.seat) });
       if (s.nearSlide !== null && !s.eating) btns.push({ id: 'slide', label: '미끄러지기', kind: 'slide', d: s.nearSlide, run: () => H.onSlide() });
       if (s.inFire && !s.seat) btns.push({ id: 'firechat', label: '대화 참여', kind: 'fire', d: 30, run: () => H.onFireChat() });

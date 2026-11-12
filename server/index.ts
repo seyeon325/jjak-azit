@@ -3,7 +3,7 @@
  *  - HTTP: 빌드된 클라이언트 정적 파일, /api/info, 학회장 로그인·CSV 내보내기
  *  - WebSocket(Socket.IO): 입장·재접속·이동·음식·온천·좌석·놀이기구·채팅·게시판·학회장 기능
  */
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { networkInterfaces } from 'node:os';
@@ -45,9 +45,25 @@ const NOTE_COOLDOWN_MS = 8000;
 const COMMENT_COOLDOWN_MS = 3000;
 const ADMIN_TTL_MS = 12 * 60 * 60 * 1000;
 
-// 학회장 비밀번호: 환경변수가 없으면 서버가 켜질 때마다 임시 비밀번호를 만들어 로그에 표시
-const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD ?? '').trim() || randomBytes(4).toString('hex');
-const ADMIN_FROM_ENV = !!(process.env.ADMIN_PASSWORD ?? '').trim();
+// 학회장 비밀번호 — 코드·저장소에는 절대 적지 않고 호스팅 환경변수로만 받음 (문자열 그대로: 앞자리 0 유지)
+//  1) ADMIN_PASSWORD_HASH = scrypt$<salt>$<hash>  (권장: npm run hashpw 로 만든 값)
+//  2) ADMIN_PASSWORD      = 비밀번호 문자열       (서버가 켜질 때 해시로 바꿔 두고, 비교는 해시로만)
+//  3) 둘 다 없으면 서버가 켜질 때마다 임시 비밀번호를 만들어 서버 로그에만 표시 (개발용)
+const ENV_HASH = String(process.env.ADMIN_PASSWORD_HASH ?? '').trim();
+const ENV_PW = String(process.env.ADMIN_PASSWORD ?? '').trim();
+const TEMP_PW = parseAdminHash(ENV_HASH) || ENV_PW ? '' : randomBytes(4).toString('hex');
+const ADMIN_SOURCE: 'hash' | 'env' | 'temp' = parseAdminHash(ENV_HASH) ? 'hash' : ENV_PW ? 'env' : 'temp';
+const ADMIN_KEY = (() => {
+  const parsed = parseAdminHash(ENV_HASH);
+  if (parsed) return parsed;
+  if (ENV_HASH) console.warn('[학회장] ADMIN_PASSWORD_HASH 형식이 올바르지 않아요. (scrypt$솔트$해시) — ADMIN_PASSWORD 를 대신 사용합니다.');
+  const salt = randomBytes(16);
+  return { salt, hash: scryptSync(ENV_PW || TEMP_PW, salt, 32) };
+})();
+function parseAdminHash(v: string): { salt: Buffer; hash: Buffer } | null {
+  const m = /^scrypt\$([0-9a-f]{16,})\$([0-9a-f]{64})$/i.exec(v);
+  return m ? { salt: Buffer.from(m[1], 'hex'), hash: Buffer.from(m[2], 'hex') } : null;
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIR = path.resolve(__dirname, '../dist/client');
@@ -73,10 +89,29 @@ function adminTokenValid(token: unknown): boolean {
   return true;
 }
 
+/** 로그아웃: 그 토큰으로 얻은 학회장 권한을 바로 회수 (아바타의 학회장 표시도 해제) */
+function revokeAdmin(token: string) {
+  if (!token) return;
+  for (const s of io.sockets.sockets.values()) {
+    const d = s.data as SocketData;
+    if (d.adminToken === token) {
+      d.admin = false;
+      d.adminToken = undefined;
+    }
+  }
+  for (const s of sessions.all()) {
+    if (s.adminToken !== token) continue;
+    s.admin = false;
+    s.adminToken = undefined;
+    if (plaza.get(s.playerId)?.host && !(hs.active && hs.hostId === s.playerId)) plaza.patch(s.playerId, { host: false });
+  }
+}
+
+/** 서버에서만 비교: 입력을 같은 솔트로 scrypt 해시한 뒤 시간 일정 비교 */
 function passwordOk(input: string) {
-  const a = Buffer.from(sha(input));
-  const b = Buffer.from(sha(ADMIN_PASSWORD));
-  return a.length === b.length && timingSafeEqual(a, b);
+  if (typeof input !== 'string' || !input || input.length > 128) return false;
+  const a = scryptSync(input.trim(), ADMIN_KEY.salt, ADMIN_KEY.hash.length);
+  return timingSafeEqual(a, ADMIN_KEY.hash);
 }
 
 // ------------------------------------------------------------------ HTTP
@@ -106,17 +141,24 @@ app.get('/api/info', (_req, res) => {
   });
 });
 
-// 학회장 로그인 (IP 당 1분에 8번까지)
+// 학회장 로그인 시도 제한: 같은 기기(IP) 1분 8번 · 서버 전체 실패 1분 40번
 const loginTries = new Map<string, number[]>();
+let globalFails: number[] = [];
 app.post('/api/admin/login', (req, res) => {
   const ip = req.ip ?? 'x';
   const now = Date.now();
   const tries = (loginTries.get(ip) ?? []).filter((t) => now - t < 60_000);
-  if (tries.length >= 8) return res.status(429).json({ ok: false, reason: '잠시 뒤에 다시 시도해주세요.' });
+  globalFails = globalFails.filter((t) => now - t < 60_000);
+  if (tries.length >= 8 || globalFails.length >= 40) return res.status(429).json({ ok: false, reason: '로그인 시도가 너무 많아요. 1분 뒤에 다시 시도해주세요.' });
   tries.push(now);
   loginTries.set(ip, tries);
+  // 숫자로 바꾸지 않고 문자열 그대로 비교 (앞자리 0 유지)
   const pw = typeof req.body?.password === 'string' ? req.body.password : '';
-  if (!pw || !passwordOk(pw)) return res.status(401).json({ ok: false, reason: '비밀번호가 맞지 않아요.' });
+  if (!pw || !passwordOk(pw)) {
+    globalFails.push(now);
+    return res.status(401).json({ ok: false, reason: '비밀번호가 맞지 않아요.' });
+  }
+  loginTries.delete(ip);
   const token = randomBytes(24).toString('hex');
   adminTokens.set(token, now + ADMIN_TTL_MS);
   log('학회장 로그인');
@@ -126,6 +168,7 @@ app.post('/api/admin/login', (req, res) => {
 app.post('/api/admin/logout', (req, res) => {
   const t = String(req.get('authorization') ?? '').replace(/^Bearer /, '');
   adminTokens.delete(t);
+  revokeAdmin(t);
   res.json({ ok: true });
 });
 
@@ -184,6 +227,7 @@ interface SocketData {
   token?: string;
   spectator?: boolean;
   admin?: boolean;
+  adminToken?: string;
   replaced?: boolean;
 }
 type IOSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
@@ -330,7 +374,11 @@ function attach(socket: IOSocket, session: Session) {
   sessions.cancelGrace(session);
   session.socketId = socket.id;
   socket.data.token = session.token;
-  if (session.admin) socket.data.admin = true; // 학회장은 재접속해도 권한 유지
+  // 학회장은 재접속해도 권한 유지 (로그인이 만료·로그아웃되지 않았을 때만)
+  if (session.admin && adminTokenValid(session.adminToken)) {
+    socket.data.admin = true;
+    socket.data.adminToken = session.adminToken;
+  }
   socket.join(plaza.channel);
   plaza.setStatus(session.playerId, 'online');
   hs.onHostBack(session.playerId);
@@ -354,6 +402,13 @@ function me(socket: IOSocket): { session: Session; info: PlayerInfo } | null {
   const session = sessions.get(socket.data.token);
   const info = session && plaza.get(session.playerId);
   return session && info ? { session, info } : null;
+}
+
+/** 게시판 쓰기·수정·삭제·하트·댓글은 게시판 근처에서만 (서버 위치로 판정, 통신 지연 여유 24px). 학회장 관리 기능은 별도 이벤트라 제한 없음 */
+const BOARD_REACH = WORLD.spots.board.r + 24;
+function boardFar(info: PlayerInfo): string | null {
+  const b = WORLD.spots.board;
+  return Math.hypot(info.x - b.x, info.y - b.y) > BOARD_REACH ? '게시판 가까이에서만 이용할 수 있어요. 게시판 앞으로 가주세요.' : null;
 }
 
 function authorOf(session: Session, info: PlayerInfo): Author {
@@ -382,7 +437,8 @@ const NOT_IN = { ok: false as const, reason: '아지트에 입장한 뒤 이용�
 
 io.on('connection', (rawSocket) => {
   const socket = rawSocket as IOSocket;
-  const isAdmin = () => !!socket.data.admin;
+  // 로그인 만료(12시간)·로그아웃 시 바로 권한이 사라지도록 매번 토큰을 확인
+  const isAdmin = () => !!socket.data.admin && adminTokenValid(socket.data.adminToken);
 
   socket.on('join', (payload, ack) => {
     if (typeof ack !== 'function') return;
@@ -473,7 +529,7 @@ io.on('connection', (rawSocket) => {
     const text = sanitizeText(payload?.text, CHAT_MAX);
     if (!m) return ack(NOT_IN);
     if (!text) return ack({ ok: false, reason: '메시지를 입력해주세요.' });
-    if (ch !== 'all' && ch !== 'fire' && ch !== 'bench') return ack({ ok: false, reason: '알 수 없는 채팅방이에요.' });
+    if (ch !== 'all' && ch !== 'fire' && ch !== 'bench' && ch !== 'table') return ack({ ok: false, reason: '알 수 없는 채팅방이에요.' });
     ack(plaza.chat(m.session.playerId, ch, text));
   });
 
@@ -521,6 +577,8 @@ io.on('connection', (rawSocket) => {
     if (typeof ack !== 'function') return;
     const m = me(socket);
     if (!m) return ack({ ok: false, reason: '아지트에 입장한 뒤 쪽지를 남길 수 있어요.' });
+    const far = boardFar(m.info);
+    if (far) return ack({ ok: false, reason: far });
     if (settings.isMuted(m.session.ownerKey)) return ack({ ok: false, reason: '학회장이 글쓰기를 잠시 제한했어요.' });
     const text = sanitizeNote(payload?.text, NOTE_MAX);
     if (!text) return ack({ ok: false, reason: '쪽지 내용을 입력해주세요.' });
@@ -537,6 +595,8 @@ io.on('connection', (rawSocket) => {
     if (typeof ack !== 'function') return;
     const m = me(socket);
     if (!m) return ack(NOT_IN);
+    const far = boardFar(m.info);
+    if (far) return ack({ ok: false, reason: far });
     const text = sanitizeNote(payload?.text, NOTE_MAX);
     if (!text) return ack({ ok: false, reason: '쪽지 내용을 입력해주세요.' });
     const r = board.edit(Number(payload?.id), m.session.ownerKey, text);
@@ -549,6 +609,8 @@ io.on('connection', (rawSocket) => {
     if (typeof ack !== 'function') return;
     const m = me(socket);
     if (!m) return ack(NOT_IN);
+    const far = boardFar(m.info);
+    if (far) return ack({ ok: false, reason: far });
     const id = Number(payload?.id);
     const r = board.remove(id, m.session.ownerKey);
     if (r !== true) return ack({ ok: false, reason: r });
@@ -560,6 +622,8 @@ io.on('connection', (rawSocket) => {
     if (typeof ack !== 'function') return;
     const m = me(socket);
     if (!m) return ack(NOT_IN);
+    const far = boardFar(m.info);
+    if (far) return ack({ ok: false, reason: far });
     const r = board.toggleLike(Number(payload?.id), m.session.ownerKey);
     if (typeof r === 'string') return ack({ ok: false, reason: r });
     io.to(plaza.channel).emit('bu', r.note);
@@ -577,6 +641,8 @@ io.on('connection', (rawSocket) => {
     if (typeof ack !== 'function') return;
     const m = me(socket);
     if (!m) return ack(NOT_IN);
+    const far = boardFar(m.info);
+    if (far) return ack({ ok: false, reason: far });
     if (settings.isMuted(m.session.ownerKey)) return ack({ ok: false, reason: '학회장이 글쓰기를 잠시 제한했어요.' });
     const text = sanitizeText(payload?.text, COMMENT_MAX);
     if (!text) return ack({ ok: false, reason: '댓글 내용을 입력해주세요.' });
@@ -594,6 +660,8 @@ io.on('connection', (rawSocket) => {
     if (typeof ack !== 'function') return;
     const m = me(socket);
     if (!m) return ack(NOT_IN);
+    const far = boardFar(m.info);
+    if (far) return ack({ ok: false, reason: far });
     const text = sanitizeText(payload?.text, COMMENT_MAX);
     if (!text) return ack({ ok: false, reason: '댓글 내용을 입력해주세요.' });
     const r = board.editComment(Number(payload?.id), m.session.ownerKey, text);
@@ -606,6 +674,8 @@ io.on('connection', (rawSocket) => {
     if (typeof ack !== 'function') return;
     const m = me(socket);
     if (!m) return ack(NOT_IN);
+    const far = boardFar(m.info);
+    if (far) return ack({ ok: false, reason: far });
     const id = Number(payload?.id);
     const r = board.removeComment(id, m.session.ownerKey);
     if (typeof r === 'string') return ack({ ok: false, reason: r });
@@ -621,8 +691,10 @@ io.on('connection', (rawSocket) => {
     if (typeof ack !== 'function') return;
     if (!adminTokenValid(payload?.token)) return ack({ ok: false, reason: '학회장 로그인이 만료됐어요. 다시 로그인해주세요.' });
     socket.data.admin = true;
+    socket.data.adminToken = payload.token as string;
     const m = me(socket);
     if (m) {
+      m.session.adminToken = payload.token as string;
       // 참가자 화면에서 로그인 = 학회장 아바타 (아바타 + 관리자 권한)
       if (!m.session.admin) log(`학회장 로그인: ${m.info.nickname} (#${m.info.id})`);
       m.session.admin = true;
@@ -997,8 +1069,10 @@ httpServer.listen(PORT, () => {
   console.log(`  - 이 컴퓨터: http://localhost:${PORT}${IS_PROD ? '' : '  (개발 모드 화면은 http://localhost:5173)'}`);
   if (IS_PROD) for (const u of lanUrls(PORT)) console.log(`  - 같은 Wi-Fi: ${u}`);
   if (PUBLIC_URL) console.log(`  - 공개 주소: ${PUBLIC_URL}`);
-  if (ADMIN_FROM_ENV) console.log('  - 학회장 페이지: /admin (ADMIN_PASSWORD 환경변수의 비밀번호)');
-  else console.log(`  - 학회장 페이지: /admin  임시 비밀번호: ${ADMIN_PASSWORD}  (재시작하면 바뀜 — ADMIN_PASSWORD 를 설정하세요)`);
+  // 실제 비밀번호는 로그에 출력하지 않음 (임시 개발용 비밀번호만 표시)
+  if (ADMIN_SOURCE === 'hash') console.log('  - 학회장 페이지: /admin (ADMIN_PASSWORD_HASH 환경변수로 확인)');
+  else if (ADMIN_SOURCE === 'env') console.log('  - 학회장 페이지: /admin (ADMIN_PASSWORD 환경변수의 비밀번호)');
+  else console.log(`  - 학회장 페이지: /admin  임시 비밀번호: ${TEMP_PW}  (재시작하면 바뀜 — ADMIN_PASSWORD 를 설정하세요)`);
   console.log('');
 });
 

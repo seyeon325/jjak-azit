@@ -9,7 +9,7 @@
  * → 열기/닫기 버튼을 패널 밖의 고정 버튼으로 분리하고, 열림 상태는 한 곳(open)에서만 관리합니다.
  */
 import { gradeLabel } from '../../../shared/foods';
-import { HS, HS_PHASE_LABEL, hsActive, POOL_LABEL, type EggAdminRow, type LuckyInfo, type PairInfo, type PairTeam, type PrizePool, type PrizeSummary } from '../../../shared/events';
+import { HS, HS_PHASE_LABEL, hsActive, POOL_LABEL, type EggAdminRow, type LuckyInfo, type PairInfo, type PrizePool, type PrizeSummary } from '../../../shared/events';
 import type { RaidAdminInfo } from '../../../shared/raid';
 import type { AdminHsInfo, AdminNote, AdminPlayer, ClientToServerEvents, DisplaySettings } from '../../../shared/protocol';
 import { TEAMS, teamSvg } from '../../../shared/social';
@@ -129,7 +129,6 @@ export class AdminPanel {
   private pair: PairInfo | null = null;
   private lucky: LuckyInfo | null = null;
   private raidInfo: RaidAdminInfo | null = null;
-  private teamDraft: PairTeam[] | null = null;
   private refreshTimer = 0;
   private liveTimer = 0;
   private searchSec = HS.searchMs / 1000;
@@ -628,7 +627,7 @@ export class AdminPanel {
   private pairView() {
     const info = this.pair;
     if (!info) return h('p', { class: 'muted' }, '불러오는 중…');
-    const teams = (this.teamDraft ??= info.teams.map((t) => ({ ...t })));
+    const teams = info.teams;
     const st = this.store.stage;
     const cmd = async (payload: Parameters<ClientToServerEvents['adminPair']>[0], msg?: string) => {
       if (await this.call('adminPair', payload)) {
@@ -638,23 +637,12 @@ export class AdminPanel {
     };
     const cards = teams.map((t, i) => {
       const a = info.assigned[t.id];
-      const name = h('input', { type: 'text', maxlength: 24, value: t.name, placeholder: `우수 PAIR ${i + 1} 팀 이름`, oninput: () => (t.name = name.value) });
-      const members = h('input', { type: 'text', maxlength: 80, value: t.members, placeholder: '팀원 (예: 홍길동, 김선배)', oninput: () => (t.members = members.value) });
-      const badge = h(
-        'select',
-        { onchange: () => (t.badge = Number(badge.value)) },
-        h('option', { value: '-1' }, '심볼 없음'),
-        ...TEAMS.map((tm) => h('option', { value: String(tm.id) }, `${tm.defaultName} 색·심볼`)),
-      );
-      badge.value = String(t.badge);
       const onStage = st.mode === 'gacha' && st.team.id === t.id;
       return h(
         'li',
         { class: `pair-card ${a ? 'done' : ''} ${onStage ? 'live' : ''}` },
-        h('div', { class: 'pair-head' }, h('b', {}, `우수 PAIR ${i + 1}`), h('em', {}, a ? `추첨 완료 · ${a.itemName}` : '미추첨')),
-        name,
-        members,
-        badge,
+        h('div', { class: 'pair-head' }, h('b', {}, `우수 PAIR ${i + 1} · ${t.name}`), h('em', {}, a ? `추첨 완료 · ${a.itemName}` : '미추첨')),
+        h('p', { class: 'pair-members' }, `팀원: ${t.members}`),
         h(
           'div',
           { class: 'row wrap' },
@@ -702,24 +690,8 @@ export class AdminPanel {
     return h(
       'div',
       { class: 'admin-screen' },
-      h('p', { class: 'muted small' }, '이미 선정된 공식 우수 PAIR 3팀에게 상품 3종을 하나씩 무작위로 배정해요. 게임 팀과는 별개예요. 팀 이름·팀원은 실제 자료로 입력해주세요.'),
+      h('p', { class: 'muted small' }, '확정된 우수 PAIR 3팀(매화·칠면조·트민녀들)에게 상품 3종을 하나씩 무작위로 배정해요. 팀 명단은 고정이라 수정할 수 없고, 상품만 무작위예요.'),
       h('ul', { class: 'pair-list' }, ...cards),
-      h(
-        'button',
-        {
-          type: 'button',
-          class: 'btn-secondary',
-          onclick: async () => {
-            (document.activeElement as HTMLElement | null)?.blur();
-            if (await this.call('adminPair', { op: 'save', teams })) {
-              this.teamDraft = null;
-              this.say('우수 PAIR 팀 정보를 저장했어요.');
-              this.refresh();
-            }
-          },
-        },
-        '팀 정보 저장',
-      ),
       h('h3', {}, `남은 상품 ${info.remaining.length}종`),
       h('p', { class: 'small' }, info.remaining.length ? info.remaining.map((r) => r.name).join(' · ') : '모든 상품을 배정했어요.'),
       h(

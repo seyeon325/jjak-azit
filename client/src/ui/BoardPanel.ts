@@ -8,6 +8,7 @@ import type { BoardComment, BoardMine, BoardNote } from '../../../shared/protoco
 import { TEAMS, teamSvg } from '../../../shared/social';
 import type { Network } from '../net/Network';
 import type { WorldStore } from '../state/WorldStore';
+import { sfx } from '../audio/Sound';
 import { h, ICON } from './dom';
 import { Sheet } from './Sheet';
 
@@ -224,6 +225,7 @@ export function openBoard(parent: HTMLElement, net: Network, store: WorldStore, 
         onclick: async () => {
           heart.disabled = true;
           const r = await net.req('boardLike', { id: n.id });
+          if (r.ok && r.liked) sfx('board.like');
           heart.disabled = false;
           if (!r.ok) return void (dmsg.textContent = r.reason);
           mine.liked = mine.liked.filter((x) => x !== n.id);

@@ -31,6 +31,8 @@ export interface InteractState {
   seat: { id: string; kind: string; d: number } | null;
   /** 앉아 있는 좌석 */
   seated: { id: string; kind: string } | null;
+  /** 근처 4인 테이블이 꽉 참 */
+  tableFull: boolean;
   /** 그네 밀어줄 수 있는 대상 */
   push: { seat: string; name: string; d: number } | null;
   nearSlide: number | null;
@@ -84,6 +86,7 @@ const FROZEN_STATE: InteractState = {
   sliding: false,
   findHost: false,
   secret: false,
+  tableFull: false,
   frozen: true,
 };
 
@@ -212,7 +215,7 @@ export class WorldScene extends Phaser.Scene {
       }
       if (p.kind === 'board' && this.ctx.mode === 'player') {
         obj.setInteractive({ useHandCursor: true, pixelPerfect: false });
-        obj.on('pointerup', () => this.ctx.onBoardTap?.());
+        this.onTap(obj, () => this.ctx.onBoardTap?.());
       }
       if (p.kind === 'foodtruck') this.addTruckLights(p.x, p.y);
       if (p.kind === 'seesaw') {
@@ -372,7 +375,7 @@ export class WorldScene extends Phaser.Scene {
     this.ctx.overlay.upsert(info, isSelf);
     if (!isSelf && this.ctx.mode === 'player') {
       a.sprite.setInteractive({ useHandCursor: true });
-      a.sprite.on('pointerup', () => this.ctx.onPlayerTap?.(info.id));
+      this.onTap(a.sprite, () => this.ctx.onPlayerTap?.(info.id));
     }
     if (isSelf) {
       this.self = a;
@@ -681,7 +684,8 @@ export class WorldScene extends Phaser.Scene {
       eating: self.eating,
       ...this.nearbyInfo(self),
     };
-    const key = JSON.stringify(st);
+    // 거리(소수점)는 매 프레임 바뀌므로 비교에서 빼고 4px 단위로만 (버튼 DOM 이 계속 바뀌면 휴대폰 터치가 씹힘)
+    const key = JSON.stringify(st, (k, v) => (k === 'd' || k === 'nearSlide') && typeof v === 'number' ? Math.round(v / 4) : v);
     if (key !== this.interactKey) {
       this.interactKey = key;
       this.ctx.onInteract?.(st);
@@ -724,6 +728,23 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * 화면(캔버스) 위에서 누르고 뗀 '진짜 탭'만 처리.
+   * Phaser 는 손가락을 뗄 때(pointerup)를 창 전체에서 받기 때문에, 그냥 두면 HUD 버튼(일어나기·표정·메뉴)을
+   * 누를 때 그 뒤에 있는 캐릭터·게시판까지 같이 눌려 다른 창이 열림 → 휴대폰에서 버튼이 안 듣는 것처럼 보임
+   */
+  private onTap(obj: Phaser.GameObjects.GameObject, fn: () => void) {
+    let downAt = -1;
+    obj.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      downAt = p.event?.target === this.game.canvas ? this.time.now : -1;
+    });
+    obj.on('pointerup', (p: Phaser.Input.Pointer) => {
+      const ok = downAt >= 0 && this.time.now - downAt < 800 && p.event?.target === this.game.canvas && p.getDistance() < 14;
+      downAt = -1;
+      if (ok) fn();
+    });
+  }
+
   /** 근처 좌석·놀이기구·참가자 판정 */
   private nearbyInfo(self: Avatar) {
     const store = this.ctx.store;
@@ -731,11 +752,13 @@ export class WorldScene extends Phaser.Scene {
     for (const e of store.players.values()) if (e.info.seat) occupied.set(e.info.seat, e.info);
     let seat: InteractState['seat'] = null;
     let push: InteractState['push'] = null;
+    let tableNear: string | null = null;
     if (!self.seat && !self.bath) {
       for (const st of WORLD.seats) {
         const d = Math.hypot(self.x - st.x, self.y - st.y);
         if (d > SEAT_RANGE + 6) continue;
         const who = occupied.get(st.id);
+        if (st.kind === 'table') tableNear = st.group;
         if (!who && (!seat || d < seat.d)) seat = { id: st.id, kind: st.kind, d };
         if (who && st.kind === 'swing' && who.id !== store.selfId && d < 46 && (!push || d < push.d))
           push = { seat: st.id, name: who.nickname, d };
@@ -769,6 +792,7 @@ export class WorldScene extends Phaser.Scene {
     return {
       findHost,
       secret: !store.hsActive && !self.bath && nearSpot(WORLD.spots.secret, self.x, self.y),
+      tableFull: !seat && tableNear !== null && WORLD.seats.every((x) => x.group !== tableNear || occupied.has(x.id)),
       frozen: false,
       seat,
       seated: self.seat ? { id: self.seat.id, kind: self.seat.kind } : null,
@@ -867,7 +891,7 @@ export class WorldScene extends Phaser.Scene {
     }
 
     for (const [id, a] of occupants) {
-      if (id.startsWith('bench') || id.startsWith('log')) {
+      if (id.startsWith('bench') || id.startsWith('log') || id.startsWith('table')) {
         a.rideX = a.rideY = a.rideRot = 0;
         a.rideScale = 1;
         a.rideDepth = null;

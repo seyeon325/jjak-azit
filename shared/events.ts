@@ -174,15 +174,22 @@ export interface PrizeAward {
 
 // ------------------------------------------------------------------ 우수 PAIR 경품 가챠 · 행운 추첨 · 무대 화면
 
-/** 공식 우수 PAIR 팀 (학회장이 실제 자료로 입력 — 아지트 게임 팀과 별개) */
+/** 공식 우수 PAIR 팀 (아지트 게임 팀과 별개) */
 export interface PairTeam {
   id: string;
   name: string;
-  /** 팀원 이름/표시명 (쉼표로 구분해 입력) */
+  /** 팀원 이름 (쉼표로 구분) */
   members: string;
   /** 대표 색·심볼 (아지트 팀 컬러 0~5, -1 = 없음) */
   badge: number;
 }
+
+/** 우수 PAIR 3팀 — 행사 확정 명단 (고정). 가챠에서는 상품만 무작위로 정해짐 */
+export const PAIR_TEAMS: readonly PairTeam[] = Object.freeze([
+  { id: 'pair1', name: '매화', members: '김승하, 양선은, 김성현', badge: -1 },
+  { id: 'pair2', name: '칠면조', members: '황정현, 선채원, 이나영', badge: -1 },
+  { id: 'pair3', name: '트민녀들', members: '박세연, 김시현, 김채영', badge: -1 },
+]);
 
 export interface GachaLog {
   at: number;

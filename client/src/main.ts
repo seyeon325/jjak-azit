@@ -11,6 +11,7 @@ import './styles/social.css';
 import './styles/events.css';
 import './styles/stage.css';
 import './styles/raid.css';
+import './styles/sound.css';
 import type Phaser from 'phaser';
 import type { JoinResult, Profile } from '../../shared/protocol';
 import { gradeLabel } from '../../shared/foods';
@@ -28,6 +29,8 @@ import { Hud } from './ui/Hud';
 import { Joystick } from './ui/Joystick';
 import { LoginScreen } from './ui/LoginScreen';
 import { ScreenHud } from './ui/ScreenHud';
+import { initSound } from './audio/Sound';
+import { startSoundDirector } from './audio/SoundDirector';
 import { WorldOverlay } from './ui/WorldOverlay';
 
 const app = document.getElementById('app')!;
@@ -126,6 +129,8 @@ async function runPlayer() {
     inGame = true;
     const input = new InputController();
     const g = await startGame('player', store, net, hooks, input);
+    // 휴대폰 소리는 기본 꺼짐 (메뉴 → 안내 → 소리에서 켤 수 있음)
+    startSoundDirector(initSound('player'), store, g.scene);
     hud = new Hud(store, net, g.overlay, {
       onRecreate: () => {
         net.leave();
@@ -277,6 +282,8 @@ async function runScreen(admin: boolean) {
 
   const g = await startGame('screen', store, net, hooks);
   g.overlay.addZoneLabels(WORLD.zones);
+  // 빔프로젝터 화면이 메인 스피커 (기본 켜짐) · 학회장 화면은 기본 꺼짐 → 같은 공간에서 소리가 겹치지 않음
+  startSoundDirector(initSound(admin ? 'admin' : 'screen'), store, g.scene);
   const hud = new ScreenHud(store, g.scene, g.canvasHost);
   hooks.screen = hud;
   g.stage.append(hud.el, new HideSeekUi(store, g.scene, 'screen').el);

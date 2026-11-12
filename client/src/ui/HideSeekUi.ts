@@ -10,50 +10,11 @@ import type { HsState } from '../../../shared/events';
 import type { WorldScene } from '../game/scenes/WorldScene';
 import type { WorldStore } from '../state/WorldStore';
 import { h } from './dom';
+import { sfx, sound } from '../audio/Sound';
 
-let audio: AudioContext | null = null;
-const SOUND_KEY = 'azit.sound';
-let soundOn = (() => {
-  try {
-    return localStorage.getItem(SOUND_KEY) !== 'off';
-  } catch {
-    return true;
-  }
-})();
-export function isSoundOn() {
-  return soundOn;
-}
-export function setSoundOn(v: boolean) {
-  soundOn = v;
-  try {
-    localStorage.setItem(SOUND_KEY, v ? 'on' : 'off');
-  } catch {
-    /* 저장 안 돼도 이번 화면에서는 적용 */
-  }
-  if (v) chime([660], 0.05);
-}
-
-/** 짧은 효과음 (소리 끔·브라우저가 막으면 조용히 넘어감 — 소리 없이도 진행에는 지장 없음) */
+/** 예전 효과음 함수 — 이제 사운드 엔진(audio/Sound.ts)으로 연결 */
 export function chime(notes: number[] = [784, 988, 1319], gap = 0.09) {
-  if (!soundOn) return;
-  try {
-    audio ??= new AudioContext();
-    const t0 = audio.currentTime + 0.02;
-    notes.forEach((f, i) => {
-      const o = audio!.createOscillator();
-      const g = audio!.createGain();
-      o.type = 'square';
-      o.frequency.value = f;
-      g.gain.setValueAtTime(0.0001, t0 + i * gap);
-      g.gain.exponentialRampToValueAtTime(0.06, t0 + i * gap + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * gap + 0.22);
-      o.connect(g).connect(audio!.destination);
-      o.start(t0 + i * gap);
-      o.stop(t0 + i * gap + 0.25);
-    });
-  } catch {
-    /* 소리 없이 진행 */
-  }
+  sound()?.notes(notes, gap);
 }
 
 export class HideSeekUi {
@@ -114,18 +75,18 @@ export class HideSeekUi {
         this.result.classList.add('hidden');
         s?.focusOn(null);
         if (this.host) this.flash('숨을 곳으로 가세요!', '15초 안에 원하는 장소로 이동하세요. 다른 화면은 가려져 있어요.');
-        else if (!restore) chime([523, 392]);
+        else if (!restore) sfx('hs.start');
         break;
       case 'searching':
         s?.focusOn(null);
         if (this.host) this.flash('수색 시작!', '이제 움직일 수 없어요. 들키지 않길!');
         else this.flash('학회장을 찾아라!', '가장 먼저 발견하는 사람이 승리합니다!');
-        if (!restore) chime([659, 784, 1047]);
+        if (!restore) sfx('hs.search');
         break;
       case 'found': {
         const pts = [st.reveal, st.winnerPos].filter(Boolean) as { x: number; y: number }[];
         this.flash('찾았다!!', '', 'big');
-        chime([784, 988, 1175, 1568], 0.08);
+        sfx('hs.found');
         this.wait(500, () => this.scene()?.focusOn(pts));
         this.wait(1300, () => {
           for (const p of pts) this.scene()?.celebrate(p.x, p.y);
@@ -135,7 +96,7 @@ export class HideSeekUi {
       }
       case 'timeout':
         this.flash('아쉽게도 아무도 학회장을 찾지 못했습니다!', '학회장은 여기 숨어 있었어요.');
-        chime([523, 440, 349], 0.14);
+        sfx('hs.fail');
         if (st.reveal) this.wait(600, () => this.scene()?.focusOn([st.reveal!]));
         break;
       case 'finished':
@@ -219,7 +180,7 @@ export class HideSeekUi {
       ),
     );
     this.result.classList.remove('hidden');
-    if (mine) chime([1047, 1319, 1568, 2093], 0.1);
+    if (mine) sfx('stage.reveal');
     // 관전 화면은 마무리되면 자동으로 닫힘
     this.wait(this.mode === 'screen' ? 14000 : 20000, () => this.result.classList.add('hidden'));
   }

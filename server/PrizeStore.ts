@@ -7,7 +7,7 @@
  * 할당량을 넘는 배정은 하지 않으므로 이벤트를 다시 해도 상품이 중복 배정되지 않습니다.
  * Node 는 한 번에 한 요청만 처리하므로 award() 는 그대로 '원자적 확정'이 됩니다.
  */
-import { ITEM, PRIZE_POOLS, type GachaLog, type HsRoundLog, type PairTeam, type PrizeAward, type PrizeItem, type PrizePool, type PrizeSummary } from '../shared/events';
+import { ITEM, PAIR_TEAMS, PRIZE_POOLS, type GachaLog, type HsRoundLog, type PairTeam, type PrizeAward, type PrizeItem, type PrizePool, type PrizeSummary } from '../shared/events';
 import { JsonFile } from './JsonFile';
 
 interface Data {
@@ -29,12 +29,8 @@ const DEFAULT_ITEMS: PrizeItem[] = [
   { id: ITEM.squishy, name: '랜덤 말랑이 세트', total: 1, alloc: { ...zero(), pair: 1 } },
   { id: ITEM.fishwarmer, name: '붕어빵 보조배터리 손난로', total: 1, alloc: { ...zero(), pair: 1 } },
 ];
-/** 우수 PAIR 3팀 자리 (이름·팀원은 학회장이 실제 자료로 입력) */
-const DEFAULT_TEAMS: PairTeam[] = [
-  { id: 'pair1', name: '', members: '', badge: -1 },
-  { id: 'pair2', name: '', members: '', badge: -1 },
-  { id: 'pair3', name: '', members: '', badge: -1 },
-];
+/** 우수 PAIR 3팀 — 확정 명단으로 고정 (저장 파일의 예전 팀 정보는 쓰지 않음) */
+const DEFAULT_TEAMS: PairTeam[] = PAIR_TEAMS.map((t) => ({ ...t }));
 
 export class PrizeStore {
   data: Data = {
@@ -60,7 +56,8 @@ export class PrizeStore {
       }
       if (Array.isArray(raw.awards)) this.data.awards = raw.awards;
       if (Array.isArray(raw.rounds)) this.data.rounds = raw.rounds;
-      if (Array.isArray(raw.pairTeams) && raw.pairTeams.length === 3) this.data.pairTeams = raw.pairTeams;
+      // 팀 명단은 항상 고정 명단 사용. 이미 저장된 가챠 결과(awards)는 팀 id 로 그대로 유지하고 표시 이름만 맞춤
+      for (const a of this.data.awards) if (a.pool === 'pair' && a.teamId) a.nickname = DEFAULT_TEAMS.find((t) => t.id === a.teamId)?.name ?? a.nickname;
       if (Array.isArray(raw.gachaLog)) this.data.gachaLog = raw.gachaLog;
       if (raw.settings) this.data.settings = { ...this.data.settings, ...raw.settings };
       this.data.nextId = Math.max(raw.nextId ?? 1, ...this.data.awards.map((a) => a.id + 1));

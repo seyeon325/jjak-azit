@@ -22,7 +22,7 @@ const HAND: Record<Dir, [number, number, number]> = {
 };
 
 /** 앉았을 때 엉덩이를 좌석 높이에 맞추는 위쪽 이동량 */
-const SIT_LIFT: Record<Seat['kind'], number> = { bench: 7, log: 8, swing: -1, seesaw: 6, spring: 10 };
+const SIT_LIFT: Record<Seat['kind'], number> = { bench: 7, log: 8, swing: -1, seesaw: 6, spring: 10, table: 7 };
 /** 뒤돌아 앉는 통나무(남쪽)는 몸이 통나무 뒤로 살짝 숨도록 덜 올림 */
 const SIT_LIFT_BACK = 6;
 

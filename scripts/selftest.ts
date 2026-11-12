@@ -103,9 +103,15 @@ async function walk(b: Bot, tx: number, ty: number, grid = WORLD.collision) {
   return !bad;
 }
 const seat = (id: string) => WORLD.seats.find((s) => s.id === id)!;
+/** 게시판 앞으로 이동 (게시판은 근처에서만 쓸 수 있음) */
+const BOARD_FRONT = WORLD.collision.nearest(WORLD.spots.board.x, WORLD.spots.board.y + 6, 30)!;
+async function toBoard(b: Bot, dx = 0) {
+  return walk(b, BOARD_FRONT.x + dx, BOARD_FRONT.y);
+}
 const standNear = (id: string) => {
   const st = seat(id);
-  return WORLD.collision.nearest(st.x, st.y + 12, 40)!;
+  // 테이블 뒷자리는 테이블 뒤(위)쪽에서 앉음
+  return WORLD.collision.nearest(st.x, st.kind === 'table' && st.dir === 0 ? st.y - 8 : st.y + 12, 40)!;
 };
 
 // ==================================================================== 1차
@@ -167,6 +173,11 @@ check(outRes.ok && WORLD.collision.canStand(a.pos.x, a.pos.y), '온천 나가기
 section('2차: 게시판 (익명 · 수정 · 삭제 · 댓글 · 하트 · 소유권)');
 const c = await joinBot('씨봇', { grade: 2 });
 const d = await joinBot('디봇', { grade: 1 });
+// 게시판 근접 제한 (온천에 있는 a 는 게시판에서 멂)
+check(Math.hypot(a.pos.x - WORLD.spots.board.x, a.pos.y - WORLD.spots.board.y) > 120, '(점검 준비) 온천 쪽은 게시판에서 멂');
+const farPost = await call(a.s, 'boardPost', { text: '멀리서 쓰기', color: 0, anon: false });
+check(!farPost.ok && /게시판 가까이/.test(farPost.reason), '게시판에서 멀면 쪽지 작성 불가 (서버 위치 판정)');
+check((await toBoard(c, -10)) && (await toBoard(d, 10)), '게시판 앞으로 이동');
 const posted = await call(c.s, 'boardPost', { text: '익명으로 쓰는 고마운 마음 '.repeat(5), color: 1, anon: true });
 check(posted.ok && posted.note.nickname === '익명' && Array.from(posted.note.text as string).length <= 100, '익명 쪽지 작성 (100자 제한, 이름 대신 익명)');
 const noteId: number = posted.note.id;
@@ -183,8 +194,11 @@ const l1 = await call(d.s, 'boardLike', { id: noteId });
 const l2 = await call(d.s, 'boardLike', { id: noteId });
 const l3 = await call(d.s, 'boardLike', { id: noteId });
 check(l1.likes === 1 && l2.likes === 0 && l3.likes === 1, '하트: 1인 1회, 다시 누르면 취소');
+check(!(await call(a.s, 'boardLike', { id: noteId })).ok, '게시판에서 멀면 하트 불가');
+check(!(await call(a.s, 'commentPost', { noteId, text: '멀리서 댓글' })).ok, '게시판에서 멀면 댓글 불가');
 // 같은 기기 키로 두 번 접속해도 하트는 하나
 const d2 = await joinBot('디봇2', {}, d.uid);
+await toBoard(d2, 4);
 const l4 = await call(d2.s, 'boardLike', { id: noteId });
 check(l4.likes === 0, '같은 사용자가 여러 창에서 눌러도 공감 수가 늘지 않음');
 d2.s.emit('leave');
@@ -197,6 +211,7 @@ check(!(await call(c.s, 'commentDelete', { id: cm.comment.id })).ok, '남의 댓
 c.s.emit('leave');
 c.s.close();
 const c2 = await joinBot('씨봇', { grade: 2 }, c.uid);
+await toBoard(c2, -4);
 const listC2 = await call(c2.s, 'boardList');
 check(listC2.mine.notes.includes(noteId), '다시 입장해도(같은 기기) 익명 글 소유권 유지');
 const del = waitFor<number>((dn) => observer.s.on('bd', (id) => id === noteId && dn(id)));
@@ -244,6 +259,66 @@ check(stand.ok && !(await call(c2.s, 'chat', { ch: 'bench', text: '혼자' })).o
 const freed = waitFor<boolean>((dn) => observer.s.on('pu', (id, p) => id === c2.id && p.seat === null && dn(true)));
 c2.s.disconnect();
 check(!!(await freed), '연결이 끊기면 좌석 자동 정리');
+
+// ==================================================================== 4인 테이블
+section('3차 마무리: 푸드트럭 4인 테이블 · 테이블 대화');
+const tSeats = WORLD.seats.filter((s) => s.kind === 'table');
+check(tSeats.length === 8 && new Set(tSeats.map((s) => s.group)).size === 2, '4인 테이블 2개 (총 8자리)');
+check(tSeats.every((s) => (s.dir === 0) === (s.y < Math.max(...tSeats.filter((x) => x.group === s.group).map((x) => x.y)))), '뒤쪽 자리는 앞을, 앞쪽 자리는 테이블 쪽을 봄');
+const tb: Bot[] = [];
+for (let i = 0; i < 5; i++) tb.push(await joinBot(`테이블${i + 1}`));
+const tOther = await joinBot('옆테이블');
+const t0 = tSeats.filter((s) => s.group === 'table0');
+const t1s = tSeats.filter((s) => s.group === 'table1');
+let walkedAll = true;
+for (let i = 0; i < 4; i++) {
+  const st = standNear(t0[i].id);
+  walkedAll = (await walk(tb[i], st.x, st.y)) && walkedAll;
+}
+const st5 = standNear(t0[0].id);
+walkedAll = (await walk(tb[4], st5.x + 6, st5.y)) && walkedAll;
+const sto = standNear(t1s[0].id);
+walkedAll = (await walk(tOther, sto.x, sto.y)) && walkedAll;
+check(walkedAll, '테이블 앞으로 이동');
+const sits = await Promise.all(tb.slice(0, 4).map((b, i) => call(b.s, 'act', { t: 'sit', seat: t0[i].id })));
+check(sits.every((r) => r.ok), '한 테이블에 4명 착석');
+const fifth = await Promise.all(t0.map((s) => call(tb[4].s, 'act', { t: 'sit', seat: s.id })));
+check(fifth.every((r) => !r.ok), '만석이면 5번째 사람은 앉을 수 없음');
+// 동시에 같은 자리 → 한 명만
+const seat3 = t1s[2];
+const stB = standNear(seat3.id);
+await walk(tb[4], stB.x, stB.y);
+await walk(tOther, stB.x + 4, stB.y);
+const race = await Promise.all([call(tb[4].s, 'act', { t: 'sit', seat: seat3.id }), call(tOther.s, 'act', { t: 'sit', seat: seat3.id })]);
+check(race.filter((r) => r.ok).length === 1, '같은 자리에 동시에 앉아도 한 명만 (중복 착석 방지)');
+const otherSeated = race[1].ok ? tOther : tb[4];
+const standing = race[1].ok ? tb[4] : tOther;
+for (const b of [...tb, tOther, observer]) b.chats.length = 0;
+check((await call(tb[0].s, 'chat', { ch: 'table', text: '테이블 비밀 얘기' })).ok, '테이블 대화 보내기');
+await sleep(250);
+check([tb[1], tb[2], tb[3]].every((b) => b.chats.some((m) => m.ch === 'table' && m.text === '테이블 비밀 얘기')), '같은 테이블 3명 모두 받음');
+check(!observer.chats.some((m) => m.ch === 'table') && !standing.chats.some((m) => m.ch === 'table'), '서 있는 사람·관전 화면은 받지 못함');
+check(!otherSeated.chats.some((m) => m.ch === 'table'), '다른 테이블에 앉은 사람은 받지 못함');
+check(!(await call(standing.s, 'chat', { ch: 'table', text: '끼어들기' })).ok, '앉지 않은 사람은 테이블 대화 불가');
+check(!(await call(otherSeated.s, 'chat', { ch: 'table', text: '혼자' })).ok, '테이블에 혼자면 테이블 대화 불가');
+check(!(await call(tb[0].s, 'chat', { ch: 'bench', text: '벤치로' })).ok, '테이블 자리에서 벤치 채널로는 보낼 수 없음');
+// 연결 끊김 → 자리 비움
+const freedT = waitFor<boolean>((dn) => observer.s.on('pu', (id, p) => id === tb[3].id && p.seat === null && dn(true)));
+tb[3].s.disconnect();
+check(!!(await freedT), '연결이 끊기면 테이블 자리 자동 비움');
+await sleep(700);
+tb[1].chats.length = 0;
+check((await call(tb[0].s, 'chat', { ch: 'table', text: '셋이서' })).ok, '남은 사람끼리 계속 대화');
+// 일어나기: 뒤쪽 자리는 테이블 뒤로, 앞쪽 자리는 앞으로 (걸을 수 있는 곳)
+const backStand = waitFor<PlayerPatch>((dn) => observer.s.on('pu', (id, p) => id === tb[0].id && p.seat === null && dn(p)));
+await call(tb[0].s, 'act', { t: 'stand' });
+const bp = await backStand;
+check(!!bp && bp.y! < t0[0].y && WORLD.collision.canStand(bp.x!, bp.y!), '뒤쪽 자리에서 일어나면 테이블 뒤 걸을 수 있는 곳에 섬');
+const frontStand = waitFor<PlayerPatch>((dn) => observer.s.on('pu', (id, p) => id === tb[2].id && p.seat === null && dn(p)));
+await call(tb[2].s, 'act', { t: 'stand' });
+const fp = await frontStand;
+check(!!fp && fp.y! > t0[2].y && WORLD.collision.canStand(fp.x!, fp.y!), '앞쪽 자리에서 일어나면 테이블 앞에 섬');
+for (const b of [...tb, tOther]) b.s.emit('leave');
 
 // ==================================================================== 놀이터
 section('2차: 놀이터 (그네 · 밀기 · 미끄럼틀 · 시소)');
@@ -338,6 +413,7 @@ const dispSeen = waitFor<boolean>((dn) => observer.s.on('display', (dd) => dn(dd
 await call(adm, 'adminDisplay', { photo: true });
 check((await dispSeen) === true, '단체 사진 모드 → 모든 화면에 전달');
 await call(adm, 'adminDisplay', { photo: false });
+await toBoard(far);
 const p2 = await call(far.s, 'boardPost', { text: '부적절한 글 테스트', color: 0, anon: true });
 const adminNotes = await call<{ id: number; author: string }[]>(adm, 'adminBoard');
 check(adminNotes.find((n) => n.id === p2.note.id)?.author === '멀리봇', '운영자는 익명 글의 작성자 확인 가능');
@@ -514,12 +590,13 @@ const pairInfo = () => call<PairInfo>(adm, 'adminPairInfo');
   }
 }
 check(!(await call(far.s, 'adminPair', { op: 'draw', teamId: 'pair1' })).ok, '일반 참가자는 가챠 조작 불가');
-const teams = [
-  { id: 'pair1', name: '점검팀 가', members: '가1, 가2', badge: 0 },
-  { id: 'pair2', name: '점검팀 나', members: '나1, 나2', badge: 1 },
-  { id: 'pair3', name: '점검팀 다', members: '다1, 다2', badge: 2 },
-];
-check((await call(adm, 'adminPair', { op: 'save', teams })).ok && (await pairInfo()).teams.map((t) => t.name).join() === '점검팀 가,점검팀 나,점검팀 다', '우수 PAIR 3팀 등록·저장');
+const fixedTeams = (await pairInfo()).teams;
+check(
+  fixedTeams.map((t) => `${t.name}:${t.members}`).join('|') === '매화:김승하, 양선은, 김성현|칠면조:황정현, 선채원, 이나영|트민녀들:박세연, 김시현, 김채영',
+  '우수 PAIR 3팀 명단 고정 (매화·칠면조·트민녀들 + 팀원)',
+);
+const tampered = fixedTeams.map((t) => ({ ...t, name: '바꾼팀' }));
+check(!(await call(adm, 'adminPair', { op: 'save', teams: tampered })).ok && (await pairInfo()).teams[0].name === '매화', '팀 명단은 학회장도 바꿀 수 없음 (상품만 무작위)');
 const pi0 = await pairInfo();
 check(pi0.remaining.length === 3 && Object.keys(pi0.assigned).length === 0, '상품 3종 재고 확인 (빔프로젝터·말랑이·손난로)');
 const readySeen = waitFor<StageState>((dn) => observer.s.on('stage', (st) => st.mode === 'gacha' && st.phase === 'ready' && dn(st)));

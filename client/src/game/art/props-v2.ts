@@ -166,28 +166,46 @@ export function bunting(): PixelCanvas {
 }
 
 export function picnic(): PixelCanvas {
-  const pc = new PixelCanvas(42, 26);
-  // 뒤 벤치
-  pc.rect(4, 3, 34, 3, P.woodDark);
-  pc.hline(4, 37, 3, P.wood);
-  // 테이블 (체크 무늬 천)
-  for (let y = 7; y < 16; y++)
-    for (let x = 2; x < 40; x++) {
-      const c = (Math.floor(x / 3) + Math.floor(y / 3)) % 2 ? P.coral : '#fff6e4';
-      pc.set(x, y, y === 15 ? P.coralDark : c);
+  // 4인 테이블 (60×46): 뒤 벤치 · 체크 테이블보 · 앞 벤치
+  const pc = new PixelCanvas(60, 46);
+  // 뒤 벤치 (등받이 없는 긴 의자)
+  pc.rect(6, 4, 48, 4, P.wood);
+  pc.hline(6, 53, 4, P.woodLight);
+  pc.hline(6, 53, 7, P.woodDark);
+  pc.rect(9, 8, 2, 3, P.woodDark);
+  pc.rect(49, 8, 2, 3, P.woodDark);
+  // 테이블 (체크 무늬 천 + 아래로 늘어진 천 자락)
+  for (let y = 11; y < 29; y++)
+    for (let x = 3; x < 57; x++) {
+      const c = (Math.floor(x / 4) + Math.floor(y / 4)) % 2 ? P.coral : '#fff6e4';
+      pc.set(x, y, y >= 26 ? (y === 28 ? P.coralDark : (Math.floor(x / 4) % 2 ? P.coralDark : '#f0dcc4')) : c);
     }
-  pc.rect(6, 16, 2, 4, P.woodDark);
-  pc.rect(34, 16, 2, 4, P.woodDark);
-  // 컵·접시
-  pc.rect(10, 9, 3, 3, P.skyLight);
-  pc.set(11, 8, '#ffffff');
-  pc.ellipse(28, 10.5, 3.2, 1.6, '#ffffff');
-  pc.set(28, 10, P.coral);
+  pc.rect(8, 29, 3, 5, P.woodDark);
+  pc.rect(49, 29, 3, 5, P.woodDark);
+  // 4인분 접시 · 컵 · 가운데 꽃병
+  for (const [px, py] of [
+    [17, 15],
+    [43, 15],
+    [17, 22],
+    [43, 22],
+  ]) {
+    pc.ellipse(px, py, 3.6, 1.8, '#ffffff');
+    pc.set(px, py, P.lemon);
+    pc.set(px + 1, py, P.coralLight);
+  }
+  pc.rect(23, 14, 2, 3, P.skyLight);
+  pc.rect(36, 21, 2, 3, P.skyLight);
+  pc.rect(29, 16, 3, 4, P.sky);
+  pc.set(30, 15, P.leaf);
+  pc.set(29, 14, P.pink);
+  pc.set(31, 14, P.lemon);
+  pc.set(30, 13, P.coral);
   // 앞 벤치
-  pc.rect(4, 19, 34, 3, P.wood);
-  pc.hline(4, 37, 19, P.woodLight);
-  pc.rect(6, 22, 2, 3, P.woodDark);
-  pc.rect(34, 22, 2, 3, P.woodDark);
+  pc.rect(6, 36, 48, 4, P.wood);
+  pc.hline(6, 53, 36, P.woodLight);
+  pc.hline(6, 53, 39, P.woodDark);
+  pc.rect(9, 40, 2, 5, P.woodDark);
+  pc.rect(49, 40, 2, 5, P.woodDark);
   pc.outline(OUT);
   return pc;
 }

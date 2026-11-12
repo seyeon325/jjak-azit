@@ -18,7 +18,6 @@ import {
   STAGE_IDLE,
   type LuckyInfo,
   type PairInfo,
-  type PairTeam,
   type StageState,
   type StageWinner,
 } from '../shared/events';
@@ -80,19 +79,9 @@ export class EventStage {
     return { teams: this.teams.map((t) => ({ ...t })), assigned, remaining: this.remainingItems(), log: [...this.d.prizes.data.gachaLog].slice(-40) };
   }
 
-  saveTeams(input: unknown): string | null {
-    if (!Array.isArray(input) || input.length !== 3) return '우수 PAIR 3팀 정보를 모두 보내주세요.';
-    const clean = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, max) : '');
-    const next: PairTeam[] = this.teams.map((t, i) => {
-      const r = (input[i] ?? {}) as Partial<PairTeam>;
-      const badge = Number(r.badge);
-      return { id: t.id, name: clean(r.name, 24), members: clean(r.members, 80), badge: Number.isInteger(badge) && badge >= -1 && badge <= 5 ? badge : -1 };
-    });
-    this.d.prizes.data.pairTeams = next;
-    // 이미 배정된 상품 기록의 팀 이름도 맞춰 둠
-    for (const a of this.d.prizes.data.awards) if (a.pool === 'pair' && a.teamId) a.nickname = next.find((t) => t.id === a.teamId)?.name || a.nickname;
-    this.d.prizes.save();
-    return null;
+  /** 우수 PAIR 팀 명단은 고정이라 수정하지 않음 (예전 화면에서 보내도 거절) */
+  saveTeams(_input: unknown): string | null {
+    return '우수 PAIR 3팀 명단은 확정 명단으로 고정돼 있어요.';
   }
 
   /** 무대에 추첨할 팀을 띄움 (아직 결과 없음) */

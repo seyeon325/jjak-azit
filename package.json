@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "bots": "tsx scripts/bots.ts",
     "raidbots": "tsx scripts/raidbots.ts",
-    "selftest": "tsx scripts/selftest.ts"
+    "selftest": "tsx scripts/selftest.ts",
+    "hashpw": "tsx scripts/hashpw.ts"
   },
   "engines": {
     "node": ">=18.18"

@@ -825,7 +825,7 @@ export const PROP_SHADOW: Partial<Record<PropKind, [number, number]>> = {
   bench: [13, 3],
   board: [40, 4],
   foodtruck: [48, 5],
-  picnic: [20, 4],
+  picnic: [28, 5],
   menuSign: [10, 2],
   capyRest: [13, 3],
   bucket: [6, 2],

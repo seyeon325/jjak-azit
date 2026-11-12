@@ -1,5 +1,5 @@
 /**
- * 채팅: 일반(전체 공개) · 모닥불(반경 안 참가자) · 벤치(같은 벤치 2인)
+ * 채팅: 일반(전체 공개) · 모닥불(반경 안 참가자) · 벤치(같은 벤치 2인) · 테이블(같은 테이블 최대 4인)
  * 실제 받는 사람은 서버가 위치·좌석으로 다시 검증합니다.
  */
 import { CHAT_MAX } from '../../../shared/constants';
@@ -12,9 +12,11 @@ export interface ChannelState {
   fire: boolean;
   fireCount: number;
   bench: string | null;
+  /** 테이블에 앉아 있을 때: 같이 앉은 사람 수(나 포함) — 2명 이상일 때만 대화 가능 */
+  table: number | null;
 }
 
-const CH_LABEL: Record<ChatChannel, string> = { all: '일반', fire: '모닥불', bench: '벤치' };
+const CH_LABEL: Record<ChatChannel, string> = { all: '일반', fire: '모닥불', bench: '벤치', table: '테이블' };
 
 export class ChatBar {
   readonly el: HTMLElement;
@@ -25,7 +27,9 @@ export class ChatBar {
   private msg: HTMLElement;
   private ch: ChatChannel = 'all';
   private userPicked = false;
-  private state: ChannelState = { fire: false, fireCount: 0, bench: null };
+  private state: ChannelState = { fire: false, fireCount: 0, bench: null, table: null };
+  /** 마지막으로 그린 칩 — 같으면 다시 그리지 않음 (휴대폰에서 누르는 도중 버튼이 바뀌면 터치가 씹힘) */
+  private chipKey = '';
   private log: ChatMessage[] = [];
   private open_ = false;
 
@@ -95,14 +99,17 @@ export class ChatBar {
   setState(s: ChannelState) {
     const prev = this.state;
     this.state = s;
+    const tableOk = (x: ChannelState) => (x.table ?? 0) >= 2;
     // 채널 자동 선택: 벤치 > 모닥불 > 일반 (사용자가 고른 건 유지, 단 쓸 수 없게 되면 해제)
     if (this.ch === 'bench' && !s.bench) this.ch = 'all';
     if (this.ch === 'fire' && !s.fire) this.ch = 'all';
+    if (this.ch === 'table' && !tableOk(s)) this.ch = 'all';
     if (!this.userPicked || this.ch === 'all') {
       if (s.bench && !prev.bench) this.ch = 'bench';
+      else if (tableOk(s) && !tableOk(prev)) this.ch = 'table';
       else if (s.fire && !prev.fire && this.ch === 'all') this.ch = 'fire';
     }
-    if (!s.bench && !s.fire) this.userPicked = false;
+    if (!s.bench && !s.fire && !tableOk(s)) this.userPicked = false;
     this.renderChips();
   }
 
@@ -110,10 +117,14 @@ export class ChatBar {
     return this.ch;
   }
 
-  private renderChips() {
+  private renderChips(force = false) {
     const opts: { ch: ChatChannel; label: string }[] = [{ ch: 'all', label: '일반 (모두)' }];
     if (this.state.fire) opts.push({ ch: 'fire', label: `모닥불 ${this.state.fireCount}명` });
     if (this.state.bench) opts.push({ ch: 'bench', label: `벤치 · ${this.state.bench}` });
+    if ((this.state.table ?? 0) >= 2) opts.push({ ch: 'table', label: `테이블 ${this.state.table}/4` });
+    const key = `${this.ch}|${opts.map((o) => o.ch + o.label).join('|')}`;
+    if (!force && key === this.chipKey) return;
+    this.chipKey = key;
     this.chips.replaceChildren(
       ...opts.map((o) =>
         h(
@@ -133,12 +144,18 @@ export class ChatBar {
       ),
     );
     this.input.placeholder =
-      this.ch === 'all' ? '모두에게 보내기' : this.ch === 'fire' ? '모닥불에 있는 사람에게만' : `${this.state.bench} 님에게만 (비공개)`;
+      this.ch === 'all'
+        ? '모두에게 보내기'
+        : this.ch === 'fire'
+          ? '모닥불에 있는 사람에게만'
+          : this.ch === 'table'
+            ? '같은 테이블 사람에게만 (비공개)'
+            : `${this.state.bench} 님에게만 (비공개)`;
     this.el.dataset.ch = this.ch;
   }
 
   open(ch?: ChatChannel) {
-    if (ch && (ch === 'all' || (ch === 'fire' && this.state.fire) || (ch === 'bench' && this.state.bench))) {
+    if (ch && (ch === 'all' || (ch === 'fire' && this.state.fire) || (ch === 'bench' && this.state.bench) || (ch === 'table' && (this.state.table ?? 0) >= 2))) {
       this.ch = ch;
       this.userPicked = true;
     }

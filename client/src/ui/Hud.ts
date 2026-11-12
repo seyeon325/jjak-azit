@@ -21,7 +21,8 @@ import { TEAMS, teamSvg, type InteractionId } from '../../../shared/social';
 import { teamName } from '../state/WorldStore';
 import { Sheet } from './Sheet';
 import { EGG_BY_ID, HS, HS_PHASE_LABEL, type EggEvent, type MyTitles } from '../../../shared/events';
-import { chime } from './HideSeekUi';
+import { sfx, sound } from '../audio/Sound';
+import { soundControls } from '../audio/SoundPanel';
 import { saveAdminToken } from './AdminPanel';
 
 /** 받침에 따라 을/를 */
@@ -50,11 +51,14 @@ export class Hud {
 
   private actionBar: ActionBar;
   private panel: Sheet | null = null;
+  /** 열려 있는 게시판 (멀어지면 자동으로 닫음) */
+  private boardSheet: Sheet | null = null;
   readonly chat: ChatBar;
   private fireCard: HTMLElement;
   private statusChip: HTMLElement;
   private noticeEl: HTMLElement;
   private last: InteractState | null = null;
+  private statusKey = '-';
   private wasInFire = false;
   private prefs = Storage.prefs;
 
@@ -81,6 +85,7 @@ export class Hud {
       onPlayer: (id) => this.openPlayer(id),
       onFireChat: () => this.chat.open('fire'),
       onUnfollow: () => this.net.socket.emit('unfollow'),
+      onFull: () => (sfx('table.full'), this.toast('이 테이블은 4자리가 모두 찼어요. 다른 테이블을 이용해주세요.', 'info')),
       onFind: async () => {
         const r = await this.net.req('hsFind');
         if (!r.ok) this.toast(r.reason, 'info');
@@ -221,7 +226,7 @@ export class Hud {
         h('span', {}, '최초 달성자가 되었습니다!'),
       );
       this.el.append(pop);
-      chime([988, 1319, 1760], 0.07);
+      sfx('egg.found');
       setTimeout(() => pop.classList.add('out'), 2800);
       setTimeout(() => pop.remove(), 3300);
       this.refreshMenu();
@@ -389,10 +394,12 @@ export class Hud {
 
   setInteract(s: InteractState) {
     this.last = s;
+    this.checkBoardRange();
     this.actionBar.update(s);
     // 채팅 채널
     const partner = this.benchPartner();
-    this.chat.setState({ fire: s.inFire, fireCount: this.fireCount(), bench: partner });
+    const table = this.tableCount();
+    this.chat.setState({ fire: s.inFire, fireCount: this.fireCount(), bench: partner, table });
     // 모닥불 카드
     if (s.inFire && !this.wasInFire) {
       this.net.req('fireQuestion', { next: false }).then((r) => 'question' in r && this.renderFire(r.question));
@@ -403,14 +410,25 @@ export class Hud {
     // 상태 칩 (벤치 대화 / 따라가기)
     const me = this.store.self;
     const followers = [...this.store.players.values()].filter((e) => e.info.followId === this.store.selfId).map((e) => e.info.nickname);
-    let chip: Node[] | null = null;
-    if (s.seated?.kind === 'bench') chip = [h('span', {}, partner ? `${partner} 님과 벤치 대화 중 (둘만 보여요)` : '벤치에 앉았어요 · 옆자리를 기다리는 중')];
+    // 글자가 바뀔 때만 다시 그림 (매번 새로 만들면 휴대폰에서 '그만' 버튼 터치가 씹힘)
+    let text: string | null = null;
+    let stop = false;
+    if (s.seated?.kind === 'bench') text = partner ? `${partner} 님과 벤치 대화 중 (둘만 보여요)` : '벤치에 앉았어요 · 옆자리를 기다리는 중';
+    else if (s.seated?.kind === 'table') text = (table ?? 1) >= 2 ? `테이블 대화 중 ${table}/4 · 같은 테이블만 보여요` : '테이블에 앉았어요 · 1/4 · 다른 사람을 기다리는 중';
     else if (me?.followId != null) {
-      const t = this.store.players.get(me.followId)?.info.nickname ?? '';
-      chip = [h('span', {}, `${t} 님을 따라가는 중`), h('button', { type: 'button', onclick: () => this.net.socket.emit('unfollow') }, '그만')];
-    } else if (followers.length) chip = [h('span', {}, `${followers.join(', ')} 님이 따라오는 중`), h('button', { type: 'button', onclick: () => this.net.socket.emit('unfollow') }, '그만')];
-    this.statusChip.classList.toggle('hidden', !chip);
-    if (chip) this.statusChip.replaceChildren(...chip);
+      text = `${this.store.players.get(me.followId)?.info.nickname ?? ''} 님을 따라가는 중`;
+      stop = true;
+    } else if (followers.length) {
+      text = `${followers.join(', ')} 님이 따라오는 중`;
+      stop = true;
+    }
+    const chipKey = text === null ? '' : `${text}|${stop}`;
+    if (chipKey !== this.statusKey) {
+      this.statusKey = chipKey;
+      this.statusChip.classList.toggle('hidden', text === null);
+      if (text !== null)
+        this.statusChip.replaceChildren(h('span', {}, text), stop ? h('button', { type: 'button', onclick: () => this.net.socket.emit('unfollow') }, '그만') : '');
+    }
   }
 
   private fireCount() {
@@ -418,6 +436,31 @@ export class Hud {
     let n = 0;
     for (const e of this.store.players.values()) if (e.info.status === 'online' && Math.hypot(e.info.x - c.x, e.info.y - c.y) <= CAMPFIRE_R) n++;
     return n;
+  }
+
+  private checkBoardRange() {
+    if (!this.boardSheet || !this.last || !this.boardFar(this.last)) return;
+    this.boardSheet.close();
+    this.boardSheet = null;
+    this.toast('게시판에서 멀어져서 게시판을 닫았어요.', 'info');
+  }
+
+  /** 게시판에서 확실히 멀어졌는지 (경계에서 깜빡이지 않도록 14px 여유) */
+  private boardFar(s: InteractState) {
+    if (s.frozen || s.bath) return true;
+    const me = this.store.self;
+    const b = MAP.spots.board;
+    return !me || Math.hypot(me.x - b.x, me.y - b.y) > b.r + 14;
+  }
+
+  /** 테이블에 앉아 있으면 같은 테이블 인원(나 포함), 아니면 null */
+  private tableCount(): number | null {
+    const me = this.store.self;
+    if (!me?.seat?.startsWith('table')) return null;
+    const group = me.seat.split('-')[0];
+    let n = 0;
+    for (const e of this.store.players.values()) if (e.info.seat?.startsWith(group + '-')) n++;
+    return Math.max(1, n);
   }
 
   private benchPartner(): string | null {
@@ -525,8 +568,19 @@ export class Hud {
 
   openBoardPanel() {
     if (this.panel?.isOpen) return;
+    // 게시판은 게시판 앞에서만 (서버도 위치를 다시 확인함)
+    if (!this.last?.nearBoard) {
+      this.toast('게시판 앞으로 가까이 가면 쪽지를 볼 수 있어요.', 'info');
+      return;
+    }
     this.actionBar.suspend(true);
-    this.panel = openBoard(this.el, this.net, this.store, () => this.actionBar.suspend(false));
+    const timer = window.setInterval(() => this.checkBoardRange(), 400);
+    const sheet = openBoard(this.el, this.net, this.store, () => {
+      clearInterval(timer);
+      this.actionBar.suspend(false);
+      if (this.boardSheet === sheet) this.boardSheet = null;
+    });
+    this.panel = this.boardSheet = sheet;
   }
 
   // -------------------------------------------------------------- 알림
@@ -646,6 +700,8 @@ export class Hud {
     return h(
       'div',
       { class: 'guide' },
+      h('h3', {}, '소리'),
+      sound() ? soundControls(sound()!, '휴대폰 소리는 기본으로 꺼져 있어요. 행사 음악은 빔프로젝터 스피커에서 나와요. 이어폰을 꽂았다면 켜 보세요!') : null,
       h('h3', {}, '이렇게 움직여요'),
       h(
         'p',

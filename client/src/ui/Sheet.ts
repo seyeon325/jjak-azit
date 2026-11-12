@@ -1,5 +1,6 @@
 /** 아래에서 올라오는 시트 (모바일) / 가운데 창 (PC) */
 import { h, icon } from './dom';
+import { sfx } from '../audio/Sound';
 
 export class Sheet {
   readonly backdrop: HTMLElement;
@@ -32,6 +33,7 @@ export class Sheet {
     );
     parent.append(this.backdrop);
     setTimeout(() => this.backdrop.classList.add('open'), 16);
+    sfx('ui.open');
   }
 
   get isOpen() {
@@ -41,6 +43,7 @@ export class Sheet {
   close() {
     if (this.closed) return;
     this.closed = true;
+    sfx('ui.close');
     this.backdrop.classList.remove('open');
     setTimeout(() => this.backdrop.remove(), 220);
     this.onClose?.();

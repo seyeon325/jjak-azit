@@ -359,7 +359,9 @@ export class PlazaRoom extends Room {
     const seat = SEAT_BY_ID.get(p.seat);
     this.seats.delete(p.seat);
     if (seat?.kind === 'swing') this.endSwingRide(id);
-    const land = seat ? WORLD.collision.nearest(seat.x, seat.y + 12, 80) ?? randomSpawn() : { x: p.x, y: p.y };
+    // 테이블 안쪽(뒤 벤치) 자리는 테이블 뒤쪽으로 일어남
+    const up = seat?.kind === 'table' && seat.dir === 0;
+    const land = seat ? WORLD.collision.nearest(seat.x, up ? seat.y - 16 : seat.y + 12, 80) ?? randomSpawn() : { x: p.x, y: p.y };
     void broadcast;
     this.patch(id, { seat: null, x: land.x, y: land.y });
   }
@@ -386,12 +388,20 @@ export class PlazaRoom extends Room {
   benchPartner(id: number): number | null {
     const seat = this.seatOf(id);
     if (!seat || seat.kind !== 'bench') return null;
+    return this.seatMates(id)[0] ?? null;
+  }
+
+  /** 같은 벤치·테이블(같은 묶음)에 앉은 다른 사람들 — 서버 좌석 기록 기준 */
+  seatMates(id: number): number[] {
+    const seat = this.seatOf(id);
+    if (!seat) return [];
+    const out: number[] = [];
     for (const s of WORLD.seats) {
       if (s.group !== seat.group || s.id === seat.id) continue;
       const other = this.seats.get(s.id);
-      if (other !== undefined) return other;
+      if (other !== undefined && other !== id) out.push(other);
     }
-    return null;
+    return out;
   }
 
   inCampfire(p: PlayerInfo) {
@@ -424,6 +434,15 @@ export class PlazaRoom extends Room {
     if (ch === 'fire') {
       if (!this.inCampfire(p)) return { ok: false, reason: '모닥불 가까이에서만 모닥불 대화를 할 수 있어요.' };
       for (const o of this.all()) if (o.status === 'online' && this.inCampfire(o)) this.hooks.emitTo(o.id, 'chat', msg);
+      return { ok: true };
+    }
+    if (ch === 'table') {
+      // 테이블: 같은 테이블에 앉은 사람에게만 (다른 테이블·서 있는 사람·관전 화면 제외)
+      if (this.seatOf(id)?.kind !== 'table') return { ok: false, reason: '테이블에 앉아야 테이블 대화를 할 수 있어요.' };
+      const mates = this.seatMates(id);
+      if (!mates.length) return { ok: false, reason: '같은 테이블에 다른 사람이 앉으면 대화할 수 있어요.' };
+      this.hooks.emitTo(id, 'chat', msg);
+      for (const m of mates) this.hooks.emitTo(m, 'chat', msg);
       return { ok: true };
     }
     // 벤치: 같은 벤치에 앉은 두 사람만

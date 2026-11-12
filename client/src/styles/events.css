@@ -749,6 +749,11 @@ body.hs-on .plate-host {
   border: 2px solid var(--line);
   background: #fff;
 }
+.pair-members {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink);
+}
 .pair-card.done {
   border-color: var(--mint-d);
   background: var(--mint-l);

@@ -13,6 +13,8 @@ export interface Session {
   graceTimer: NodeJS.Timeout | null;
   /** 학회장(운영자 인증) 참가자 — 재접속해도 유지 */
   admin: boolean;
+  /** 학회장 로그인 토큰 (만료·로그아웃되면 권한도 사라짐) */
+  adminToken?: string;
 }
 
 export class SessionStore {

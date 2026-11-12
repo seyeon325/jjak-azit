@@ -91,7 +91,7 @@ export interface Spot {
   r: number;
 }
 
-export type SeatKind = 'bench' | 'log' | 'swing' | 'seesaw' | 'spring';
+export type SeatKind = 'bench' | 'log' | 'swing' | 'seesaw' | 'spring' | 'table';
 export interface Seat {
   id: string;
   kind: SeatKind;
@@ -304,8 +304,9 @@ function buildMap(): WorldMap {
   add({ kind: 'bunting', x: px(11), y: px(3) + 10 });
   add({ kind: 'foodtruck', x: px(11), y: px(6) + 8, foot: [90, 16] });
   add({ kind: 'menuSign', x: px(4) + 12, y: px(8) + 2, foot: [14, 5] });
-  add({ kind: 'picnic', x: px(6), y: px(11) + 4, foot: [34, 10] });
-  add({ kind: 'picnic', x: px(16), y: px(11) + 4, foot: [34, 10], flip: true });
+  // 4인 테이블 2개 (테이블 위로는 못 지나가게 천까지 막음)
+  add({ kind: 'picnic', x: px(6), y: px(11) + 4, foot: [56, 28] });
+  add({ kind: 'picnic', x: px(16), y: px(11) + 4, foot: [56, 28], flip: true });
   add({ kind: 'pot', x: px(17) + 10, y: px(7) + 6, foot: [10, 5] });
   add({ kind: 'sign', x: px(13) + 6, y: px(13) + 4, foot: [4, 4], label: '푸드트럭' });
 
@@ -473,11 +474,20 @@ function buildMap(): WorldMap {
   const seats: Seat[] = [];
   let benchN = 0;
   let logN = 0;
+  let tableN = 0;
   for (const p of props) {
     if (p.kind === 'bench') {
       const g = `bench${benchN++}`;
       seats.push({ id: `${g}-0`, kind: 'bench', group: g, x: p.x - 7, y: p.y + 1, dir: 0 });
       seats.push({ id: `${g}-1`, kind: 'bench', group: g, x: p.x + 7, y: p.y + 1, dir: 0 });
+    }
+    if (p.kind === 'picnic') {
+      // 4인 테이블: 뒤 벤치 2명은 테이블을 보며 앞(아래)을, 앞 벤치 2명은 테이블 쪽(위)을 봄
+      const g = `table${tableN++}`;
+      seats.push({ id: `${g}-0`, kind: 'table', group: g, x: p.x - 11, y: p.y - 30, dir: 0 });
+      seats.push({ id: `${g}-1`, kind: 'table', group: g, x: p.x + 11, y: p.y - 30, dir: 0 });
+      seats.push({ id: `${g}-2`, kind: 'table', group: g, x: p.x - 11, y: p.y - 1, dir: 1 });
+      seats.push({ id: `${g}-3`, kind: 'table', group: g, x: p.x + 11, y: p.y - 1, dir: 1 });
     }
     if (p.kind === 'log') {
       const g = `log${logN++}`;

@@ -11,7 +11,7 @@ import { buildCharacterSheet, FRAME_H, FRAME_W } from '../game/art/characters';
 import { capsule, CAPSULE_COLORS, gachaHandle, gachaMachine, giftBox, pixelEl, prizeIcon, starIcon } from '../game/art/prizes';
 import type { WorldStore } from '../state/WorldStore';
 import { h } from './dom';
-import { chime } from './HideSeekUi';
+import { sfx } from '../audio/Sound';
 
 function avatar(look: number, frame: 'v' | 'stand' = 'v', scale = 8): HTMLCanvasElement {
   const sheet = buildCharacterSheet(look);
@@ -89,7 +89,7 @@ export class StageShow {
         h('p', { class: 'st-foot' }, '수상을 축하합니다!'),
         this.confetti(40),
       );
-      chime([784, 988, 1175, 1568], 0.09);
+      sfx('stage.reveal');
     }
     if (st.mode === 'lucky') this.lucky(st, head);
     if (st.mode === 'luckySummary') {
@@ -99,7 +99,7 @@ export class StageShow {
         h('p', { class: 'st-foot' }, '축하합니다! 행사장에서 상품권을 받아가세요'),
         this.confetti(40),
       );
-      chime([784, 988, 1175, 1568], 0.09);
+      sfx('stage.reveal');
     }
   }
 
@@ -143,20 +143,20 @@ export class StageShow {
     const res = st.result;
     this.wait(at(0), () => {
       machine.classList.add('turn');
-      chime([523, 659], 0.12);
+      sfx('stage.roll');
     });
     this.wait(at(800), () => {
       machine.classList.add('shake');
       let k = 0;
       this.timer = window.setInterval(() => {
-        if (++k % 3 === 0) chime([880 + (k % 4) * 60], 0.05);
+        if (++k % 3 === 0) sfx('stage.tick');
       }, 120);
     });
     this.wait(at(2800), () => {
       clearInterval(this.timer);
       machine.classList.remove('shake');
       out.replaceChildren(pixelEl(capsule(st.pool.findIndex((p) => p.id === res.id) + 1), 6, 'drop'));
-      chime([392, 523], 0.1);
+      sfx('stage.drop');
     });
     this.wait(at(3200), () => {
       out.replaceChildren(pixelEl(capsule(1, true), 6, 'opened'), pixelEl(prizeIcon(res.id, true), 6, 'silhouette'));
@@ -179,7 +179,7 @@ export class StageShow {
         ),
         this.confetti(36),
       );
-      chime([784, 988, 1175, 1568], 0.09);
+      sfx('stage.reveal');
     };
     // 타이머가 늦어도 시간이 되면 반드시 공개
     const guard = window.setInterval(() => at(GACHA_SPIN_MS) <= 0 && reveal(), 250);
@@ -226,7 +226,7 @@ export class StageShow {
       const card = this.winnerCard(w, 'pop');
       slot.replaceWith(card);
       this.board.append(this.confetti(30));
-      chime([784, 988, 1175, 1568], 0.09);
+      sfx('stage.reveal');
     };
     if (left <= 0) return showWinner();
     const roll = h('div', { class: 'st-card rolling' }, h('div', { class: 'st-roll-name' }, ''), h('div', { class: 'st-count' }, ''));
@@ -238,7 +238,7 @@ export class StageShow {
       if (remain <= 0) return showWinner(); // 타이머가 늦게 와도 시간이 되면 공개
       (roll.firstChild as HTMLElement).textContent = names[k++ % names.length];
       (roll.lastChild as HTMLElement).textContent = remain > 0 ? String(Math.ceil(remain / 1000)) : '';
-      if (k % 2 === 0) chime([700 + (k % 5) * 40], 0.04);
+      if (k % 2 === 0) sfx('stage.tick');
     };
     tick();
     this.timer = window.setInterval(tick, left > 1200 ? 90 : 160);

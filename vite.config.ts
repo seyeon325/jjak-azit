@@ -5,7 +5,8 @@ const SERVER = `http://localhost:${process.env.DEV_SERVER_PORT ?? 3000}`;
 
 export default defineConfig({
   root: 'client',
-  publicDir: false,
+  // client/public 의 파일(선택: sounds/ 음원 등)을 그대로 배포 — 폴더가 없으면 아무것도 안 함
+  publicDir: 'public',
   server: {
     host: true, // 같은 Wi-Fi의 휴대폰에서도 접속 가능
     port: 5173,

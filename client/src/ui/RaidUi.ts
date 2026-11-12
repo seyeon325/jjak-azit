@@ -12,7 +12,7 @@ import type { RaidCtx, RaidScene } from '../game/scenes/RaidScene';
 import type { Network } from '../net/Network';
 import type { WorldStore } from '../state/WorldStore';
 import { h } from './dom';
-import { chime } from './HideSeekUi';
+import { sfx } from '../audio/Sound';
 import { WorldOverlay } from './WorldOverlay';
 
 const SHOW_PHASES = new Set(['countdown', 'battle', 'victory', 'defeat', 'awards']);
@@ -146,7 +146,7 @@ export class RaidUi {
         this.call.classList.remove('hidden');
         clearTimeout(this.callTimer);
         this.callTimer = window.setTimeout(() => this.call.classList.add('hidden'), 2200);
-        chime([880, 660], 0.08);
+        sfx('raid.help');
       }
     });
     store.on('reset', () => this.apply(store.raid, null));
@@ -249,9 +249,9 @@ export class RaidUi {
     if (awardsOn && (prev?.shown !== st.shown || prev?.phase !== 'awards')) this.renderAwards(st);
     // 효과음 (단계 전환)
     if (prev && st.phase !== this.lastPhase) {
-      if (st.phase === 'battle') chime([523, 659, 784], 0.1);
-      if (st.phase === 'victory') chime([784, 988, 1175, 1568], 0.1);
-      if (st.phase === 'defeat') chime([523, 440, 349], 0.15);
+      if (st.phase === 'battle') sfx('raid.go');
+      if (st.phase === 'victory') sfx('raid.victory');
+      if (st.phase === 'defeat') sfx('raid.defeat');
     }
     this.lastPhase = st.phase;
     if (show) this.renderHud(st);
@@ -350,7 +350,7 @@ export class RaidUi {
       this.countdown.classList.remove('hidden');
       if (this.countdown.textContent !== String(s)) {
         this.countdown.textContent = String(s);
-        chime([440], 0.05);
+        sfx('raid.count');
       }
     } else this.countdown.classList.add('hidden');
     const left = st.phase === 'battle' ? Math.max(0, Math.ceil((st.endsAt - (st.paused ? st.now : now)) / 1000)) : 0;
@@ -430,6 +430,6 @@ export class RaidUi {
         ),
       ),
     );
-    if (st.shown > 0) chime([784, 988, 1319], 0.08);
+    if (st.shown > 0) sfx('award.reveal');
   }
 }

@@ -150,7 +150,7 @@ export type BoardResult<T = unknown> = ({ ok: true } & T) | { ok: false; reason:
 
 // ------------------------------------------------------------------ 채팅
 
-export type ChatChannel = 'all' | 'fire' | 'bench';
+export type ChatChannel = 'all' | 'fire' | 'bench' | 'table';
 export interface ChatMessage {
   ch: ChatChannel;
   from: number;

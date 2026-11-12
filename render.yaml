@@ -11,5 +11,9 @@ services:
         value: 20
       - key: PUBLIC_URL
         sync: false
+      # 학회장 비밀번호: 값은 여기 적지 말고 Render 대시보드 Environment 에서만 입력
+      #  ADMIN_PASSWORD (비밀번호 문자열) 또는 ADMIN_PASSWORD_HASH (npm run hashpw 결과) 중 하나
       - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_PASSWORD_HASH
         sync: false
